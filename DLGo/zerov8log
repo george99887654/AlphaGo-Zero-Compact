@@ -1,0 +1,137 @@
+----------------------
+Starting from bots/zerov8_test.hdf5 at 2020-06-05 14:25:41.311877
+Total games so far 0
+----------------------
+Starting from bots/zerov8_test.hdf5 at 2020-06-05 14:27:04.047186
+Total games so far 0
+----------------------
+Starting from bots/zerov8_test.hdf5 at 2020-06-05 14:28:47.078574
+Total games so far 0
+Won 5 / 5 games (1.000)
+New reference is /Users/georgeyeh/DLGo/bots/zerov8_agent_00000010.hdf5
+Total games so far 10
+Won 2 / 5 games (0.400)
+Total games so far 20
+Won 4 / 5 games (0.800)
+New reference is /Users/georgeyeh/DLGo/bots/zerov8_agent_00000030.hdf5
+Total games so far 30
+Won 3 / 5 games (0.600)
+New reference is /Users/georgeyeh/DLGo/bots/zerov8_agent_00000040.hdf5
+Total games so far 40
+Won 4 / 5 games (0.800)
+New reference is /Users/georgeyeh/DLGo/bots/zerov8_agent_00000050.hdf5
+Total games so far 50
+Won 2 / 5 games (0.400)
+Total games so far 60
+Won 2 / 5 games (0.400)
+Total games so far 70
+Won 1 / 5 games (0.200)
+Total games so far 80
+Won 0 / 5 games (0.000)
+Total games so far 90
+Won 0 / 5 games (0.000)
+Total games so far 100
+Won 2 / 5 games (0.400)
+Total games so far 110
+Won 0 / 5 games (0.000)
+Total games so far 120
+Won 0 / 5 games (0.000)
+Total games so far 130
+Won 0 / 5 games (0.000)
+Total games so far 140
+Won 0 / 5 games (0.000)
+Total games so far 150
+Won 0 / 5 games (0.000)
+Total games so far 160
+Won 0 / 5 games (0.000)
+Total games so far 170
+Won 0 / 5 games (0.000)
+Total games so far 180
+Won 0 / 5 games (0.000)
+Total games so far 190
+Won 0 / 5 games (0.000)
+Total games so far 200
+----------------------
+Starting from bots/zerov8_agent_00000050.hdf5 at 2020-06-05 21:26:47.722785
+Total games so far 0
+----------------------
+Starting from bots/zerov8_agent_00000050.hdf5 at 2020-06-05 21:28:29.830989
+Total games so far 0
+----------------------
+Starting from bots/zerov8_agent_00000050.hdf5 at 2020-06-05 22:07:01.708418
+Total games so far 0
+Won 1 / 5 games (0.200)
+Total games so far 100
+Won 2 / 5 games (0.400)
+Total games so far 200
+Won 1 / 5 games (0.200)
+Total games so far 300
+Won 1 / 5 games (0.200)
+Total games so far 400
+Won 3 / 5 games (0.600)
+New reference is /Users/georgeyeh/DLGo/bots/zerov8_agent_00000500.hdf5
+Total games so far 500
+Won 2 / 5 games (0.400)
+Total games so far 600
+----------------------
+----------------------
+Starting from bots/zerov8_agent_cur.hdf5 at 2020-06-06 12:28:35.916696
+Referencing from zerov8_agent_00000500.hdf5 at 2020-06-06 12:28:35.916710
+Total games so far 0
+----------------------
+Starting from bots/zerov8_agent_cur.hdf5 at 2020-06-06 12:30:01.546559
+Referencing from bots/zerov8_agent_00000500.hdf5 at 2020-06-06 12:30:01.546578
+Total games so far 0
+Won 5 / 10 games (0.500)
+Total games so far 100
+Won 3 / 10 games (0.300)
+Total games so far 200
+Won 7 / 10 games (0.700)
+New reference is /Users/georgeyeh/DLGo/bots/zerov8_agent_00000300.hdf5
+Total games so far 300
+----------------------
+Starting from bots/zerov8_agent_cur.hdf5 at 2020-06-06 20:24:35.460117
+Referencing from bots/zerov8_agent_00000300.hdf5 at 2020-06-06 20:24:35.460132
+Total games so far 0
+Won 6 / 10 games (0.600)
+Total games so far 100
+Won 5 / 10 games (0.500)
+Total games so far 200
+Won 5 / 10 games (0.500)
+Total games so far 300
+Won 5 / 10 games (0.500)
+Total games so far 400
+Won 5 / 10 games (0.500)
+Total games so far 500
+Won 5 / 10 games (0.500)
+Total games so far 600
+Won 7 / 10 games (0.700)
+New reference is /Users/georgeyeh/DLGo/bots/zerov8_agent_00000700.hdf5
+Total games so far 700
+Won 6 / 10 games (0.600)
+Total games so far 800
+Won 4 / 10 games (0.400)
+Total games so far 900
+Won 5 / 10 games (0.500)
+Total games so far 1000
+Won 5 / 10 games (0.500)
+Total games so far 1100
+Won 3 / 10 games (0.300)
+Total games so far 1200
+Won 6 / 10 games (0.600)
+Total games so far 1300
+Won 4 / 10 games (0.400)
+Total games so far 1400
+Won 4 / 10 games (0.400)
+Total games so far 1500
+Won 2 / 10 games (0.200)
+Total games so far 1600
+Won 7 / 10 games (0.700)
+New reference is /Users/georgeyeh/DLGo/bots/zerov8_agent_00001700.hdf5
+Total games so far 1700
+Won 5 / 10 games (0.500)
+Total games so far 1800
+Won 3 / 10 games (0.300)
+Total games so far 1900
+Won 6 / 10 games (0.600)
+Total games so far 2000
