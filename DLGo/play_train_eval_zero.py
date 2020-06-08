@@ -302,9 +302,9 @@ def main():
 
     learning_agent = args.lagent
     reference_agent = args.ragent
-    experience_file = os.path.join(args.work_dir, 'zerov8_exp_temp.hdf5')
-    tmp_agent = os.path.join(args.work_dir, 'zerov8_agent_temp.hdf5')
-    working_agent = os.path.join(args.work_dir, 'zerov8_agent_cur.hdf5')
+    experience_file = os.path.join(args.work_dir, 'zero_exp_temp.hdf5')
+    tmp_agent = os.path.join(args.work_dir, 'zero_agent_temp.hdf5')
+    working_agent = os.path.join(args.work_dir, 'zero_agent_cur.hdf5')
     total_games = 0
     while True:
         print('Reference: %s' % (reference_agent,))
@@ -336,7 +336,7 @@ def main():
         if wins >= 7:
             next_filename = os.path.join(
                 args.work_dir,
-                'zerov8_agent_%08d.hdf5' % (total_games,))
+                'zero_agent_%08d.hdf5' % (total_games,))
             shutil.move(tmp_agent, next_filename)
             reference_agent = next_filename
             logf.write('New reference is %s\n' % next_filename)
