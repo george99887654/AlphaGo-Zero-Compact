@@ -4,7 +4,7 @@ DLGo/checkpoint/
 DLGo/node_modules/
 DLGo/Play.ipynb
 .DS_Store
-
+DLGo/bots
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
