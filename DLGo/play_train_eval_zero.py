@@ -309,34 +309,35 @@ def main():
     while True:
         print('Reference: %s' % (reference_agent,))
         logf.write('Total games so far %d\n' % (total_games,))
-        generate_experience(
-            learning_agent, reference_agent,
-            experience_file,
-            num_games=args.games_per_batch,
-            board_size=args.board_size,
-            num_workers=args.num_workers)
-        train_on_experience(
-            learning_agent, tmp_agent, experience_file,
-            lr=args.lr, batch_size=args.bs)
-        total_games += args.games_per_batch
+        for _ in range(10):
+            generate_experience(
+                learning_agent, reference_agent,
+                experience_file,
+                num_games=args.games_per_batch,
+                board_size=args.board_size,
+                num_workers=args.num_workers)
+            train_on_experience(
+                learning_agent, tmp_agent, experience_file,
+                lr=args.lr, batch_size=args.bs)
+            total_games += args.games_per_batch
         
         wins = evaluate(
             learning_agent, reference_agent,
-            num_games=10,
+            num_games=100,
             num_workers=args.num_workers,
             board_size=args.board_size)
-        print('Won %d / 10 games (%.3f)' % (
-            wins, float(wins) / 10.0))
-        logf.write('Won %d / 10 games (%.3f)\n' % (
-            wins, float(wins) / 10.0))
+        print('Won %d / 100 games (%.3f)' % (
+            wins, float(wins) / 100.0))
+        logf.write('Won %d / 100 games (%.3f)\n' % (
+            wins, float(wins) / 100.0))
         
         shutil.copy(tmp_agent, working_agent)
         learning_agent = working_agent
         
-        if wins >= 7:
+        if wins >= 60:
             next_filename = os.path.join(
                 args.work_dir,
-                'zero_agent_%08d.hdf5' % (total_games,))
+                'zero_agent_v2_%08d.hdf5' % (total_games,))
             shutil.move(tmp_agent, next_filename)
             reference_agent = next_filename
             logf.write('New reference is %s\n' % next_filename)
