@@ -1,0 +1,28 @@
+----------------------
+Starting from bots/zero_agent_v4.hdf5 at 2020-06-22 06:31:43.978076
+Referencing from bots/zeroagent_v1.hdf5 at 2020-06-22 06:31:43.978097
+----------------------
+Starting from bots/zeroagent_v2.hdf5 at 2020-06-22 06:38:20.200919
+Referencing from bots/zeroagent_v1.hdf5 at 2020-06-22 06:38:20.200940
+Won 28 / 50 games (0.560)
+----------------------
+Starting from bots/zero_agent_v3.hdf5 at 2020-06-22 07:33:30.900189
+Referencing from bots/zeroagent_v1.hdf5 at 2020-06-22 07:33:30.900209
+----------------------
+Starting from bots/zero_agent_v3.hdf5 at 2020-06-22 07:49:42.652970
+Referencing from bots/zeroagent_v2.hdf5 at 2020-06-22 07:49:42.652990
+----------------------
+Starting from zero_agent_00001750.hdf5 at 2020-06-22 08:07:07.261598
+Referencing from bots/zeroagent_v2.hdf5 at 2020-06-22 08:07:07.261619
+----------------------
+Starting from zero_agent_00002700.hdf5 at 2020-06-22 08:08:18.969960
+Referencing from bots/zeroagent_v2.hdf5 at 2020-06-22 08:08:18.969981
+----------------------
+Starting from bots/zero_agent_00001750.hdf5 at 2020-06-22 08:09:57.489894
+Referencing from bots/zeroagent_v2.hdf5 at 2020-06-22 08:09:57.489913
+----------------------
+Starting from bots/zero_agent_00000150.hdf5 at 2020-06-22 08:21:37.082209
+Referencing from bots/zeroagent_v2.hdf5 at 2020-06-22 08:21:37.082228
+----------------------
+Starting from bots/zero_agent_00000600.hdf5 at 2020-06-22 08:36:29.132652
+Referencing from bots/zeroagent_v2.hdf5 at 2020-06-22 08:36:29.132672
