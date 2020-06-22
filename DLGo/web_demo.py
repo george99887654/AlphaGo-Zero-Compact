@@ -18,6 +18,5 @@ def main():
     web_app = httpfrontend.get_web_app(zero_agent)
     web_app.run(host=args.bind_address, port=args.port, threaded=False)
 
-
 if __name__ == '__main__':
     main()
