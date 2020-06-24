@@ -305,7 +305,9 @@ def main():
     experience_file = os.path.join(args.work_dir, 'zero_exp_temp.hdf5')
     tmp_agent = os.path.join(args.work_dir, 'zero_agent_temp.hdf5')
     working_agent = os.path.join(args.work_dir, 'zero_agent_cur.hdf5')
+    training_agent = os.path.join(args.work_dir, 'zero_agent_train.hdf5')
     total_games = 0
+    shutil.copy(learning_agent, training_agent)
     while True:
         print('Reference: %s' % (reference_agent,))
         logf.write('Total games so far %d\n' % (total_games,))
@@ -317,12 +319,12 @@ def main():
                 board_size=args.board_size,
                 num_workers=args.num_workers)
             train_on_experience(
-                learning_agent, tmp_agent, experience_file,
+                training_agent, tmp_agent, experience_file,
                 lr=args.lr, batch_size=args.bs)
             total_games += args.games_per_batch
         
         wins = evaluate(
-            learning_agent, reference_agent,
+            training_agent, reference_agent,
             num_games=100,
             num_workers=args.num_workers,
             board_size=args.board_size)
@@ -332,13 +334,13 @@ def main():
             wins, float(wins) / 100.0))
         
         shutil.copy(tmp_agent, working_agent)
-        learning_agent = working_agent
         
         if wins >= 60:
             next_filename = os.path.join(
                 args.work_dir,
                 'zero_agent_v2_%08d.hdf5' % (total_games,))
             shutil.move(tmp_agent, next_filename)
+            learning_agent = next_filename
             reference_agent = next_filename
             logf.write('New reference is %s\n' % next_filename)
         else:
