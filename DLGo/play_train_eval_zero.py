@@ -90,6 +90,36 @@ def simulate_game(
         margin=game_result.winning_margin,
     )
 
+def eval_simulate_game(
+        black_agent,
+        white_agent,
+        board_size,):
+    moves = []
+    game = GameState.new_game(board_size)
+    agents = {
+        Player.black: black_agent,
+        Player.white: white_agent,
+    }
+
+    num_moves = 0
+    while (not game.is_over()) & (num_moves < 2*board_size*board_size):
+        agents[game.next_player].set_temperature(0.05)
+        next_move = agents[game.next_player].select_move(game)
+        moves.append(next_move)
+        game = game.apply_move(next_move)
+        num_moves += 1
+        
+    print('number of moves: %d'% num_moves)
+    print_board(game.board)
+    game_result = scoring.compute_game_result(game)
+    print(game_result)
+    
+    return GameRecord(
+        moves=moves,
+        winner=game_result.winner,
+        margin=game_result.winning_margin,
+    )
+
 
 def get_temp_file():
     fd, fname = tempfile.mkstemp(prefix='dlgo-train')
@@ -252,6 +282,38 @@ def play_games(args):
         color1 = color1.other
     return wins, losses
 
+def eval_play_games(args):
+    agent1_fname, agent2_fname, num_games, board_size, gpu_frac = args
+
+    kerasutil.set_gpu_memory_target(gpu_frac)
+
+    random.seed(int(time.time()) + os.getpid())
+    np.random.seed(int(time.time()) + os.getpid())
+
+    agent1 = load_agent(agent1_fname)
+    agent2 = load_agent(agent2_fname)
+
+    wins, losses = 0, 0
+    color1 = Player.black
+    for i in range(num_games):
+        print('Simulating game %d/%d...' % (i + 1, num_games))
+        if color1 == Player.black:
+            black_player, white_player = agent1, agent2
+        else:
+            white_player, black_player = agent1, agent2
+            
+        game_record = eval_simulate_game(black_player, white_player, board_size)
+        
+        if game_record.winner == color1:
+            print('Agent 1 wins')
+            wins += 1
+        else:
+            print('Agent 2 wins')
+            losses += 1
+        print('Agent 1 record: %d/%d' % (wins, wins + losses))
+        color1 = color1.other
+    return wins, losses
+
 
 def evaluate(learning_agent, reference_agent,
              num_games, num_workers, board_size):
@@ -265,7 +327,7 @@ def evaluate(learning_agent, reference_agent,
         )
         for _ in range(num_workers)
     ]
-    game_results = pool.map(play_games, worker_args)
+    game_results = pool.map(eval_play_games, worker_args)
 
     total_wins, total_losses = 0, 0
     for wins, losses in game_results:
