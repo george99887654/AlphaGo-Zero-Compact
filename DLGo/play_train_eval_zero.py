@@ -52,7 +52,7 @@ class GameRecord(namedtuple('GameRecord', 'moves winner margin')):
 
 def name(player):
     if player == Player.black:
-        return 'B'
+       return 'B'
     return 'W'
 
 def simulate_game(
@@ -311,7 +311,8 @@ def main():
     while True:
         print('Reference: %s' % (reference_agent,))
         logf.write('Total games so far %d\n' % (total_games,))
-        for _ in range(10):
+        for i in range(10):
+            print('Round %d/10' % i)
             generate_experience(
                 learning_agent, reference_agent,
                 experience_file,
@@ -335,7 +336,7 @@ def main():
         
         shutil.copy(tmp_agent, working_agent)
         
-        if wins >= 60:
+        if wins >= 55:
             next_filename = os.path.join(
                 args.work_dir,
                 'zero_agent_v2_%08d.hdf5' % (total_games,))
