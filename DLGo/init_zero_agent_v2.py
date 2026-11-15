@@ -2,9 +2,6 @@ import argparse
 
 import h5py
 
-from tensorflow.keras.layers import Activation, BatchNormalization
-from tensorflow.keras.layers import Conv2D, Dense, Flatten, Input
-from tensorflow.keras.models import Model
 import dlgo.networks
 from dlgo import zero
 from dlgo import encoders

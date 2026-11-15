@@ -11,6 +11,20 @@ uv venv --python 3.10 .venv
 uv pip install --python .venv -r requirements.txt
 ```
 
+### GPU (optional, NVIDIA)
+Install the CUDA 11.8 / cuDNN 8.9 runtime as pip wheels in the same venv; no
+system CUDA install is needed, only an NVIDIA driver:
+
+```
+uv pip install --python .venv -r requirements-gpu.txt
+```
+
+`dlgo` puts these libraries on the DLL search path automatically (import `dlgo`
+before `tensorflow`). Check with
+`python -c "import dlgo, tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"`.
+To force the CPU, set `CUDA_VISIBLE_DEVICES=-1`. Worker processes share the GPU
+via memory growth.
+
 All commands below are run from the `DLGo/` directory with that environment's
 Python (`../.venv/Scripts/python` on Windows, `../.venv/bin/python` elsewhere).
 

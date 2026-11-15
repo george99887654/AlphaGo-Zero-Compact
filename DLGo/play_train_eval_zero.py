@@ -222,6 +222,7 @@ def generate_experience(learning_agent, reference_agent, exp_file,
 
 def train_worker(learning_agent, output_file, experience_file,
                  lr, batch_size):
+    kerasutil.set_gpu_memory_target(1.0)
     learning_agent = load_agent(learning_agent)
     with h5py.File(experience_file, 'r') as expf:
         exp_buffer = zero.load_experience(expf)
