@@ -17,65 +17,92 @@ __all__ = [
     'load_zero_agent',
 ]
 
-# tag::branch_struct[]
-class Branch:
-    def __init__(self, prior):
-        self.prior = prior
-        self.visit_count = 0
-        self.total_value = 0.0
-# end::branch_struct[]
-
-
 # tag::node_class_defn[]
 class ZeroTreeNode:
 # end::node_class_defn[]
+    """A search-tree node.
+
+    Branch statistics are stored as NumPy arrays indexed by "slot" (the
+    position of a legal move in self.branch_moves), so selecting a branch is
+    one vectorized operation instead of a Python loop over every move.
+    Children are keyed by slot as well.
+    """
 # tag::node_class_body[]
-    def __init__(self, state, value, priors, parent, last_move):
+    def __init__(self, state, value, priors, parent, last_slot, all_moves):
+        """`priors` is the prior vector over all encoder moves (board points +
+        pass) and `all_moves[i]` the Move for encoder index i. `last_slot` is
+        the slot in `parent` of the move that led here (None for a root)."""
         self.state = state
         self.value = value
         self.parent = parent                      # <1>
-        self.last_move = last_move                # <1>
+        self.last_slot = last_slot                # <1>
         self.total_visit_count = 1
-        self.branches = {}
-        for move, p in priors.items():
-            if state.is_valid_move(move) and not is_point_an_eye(state.board, move.point, state.next_player):
-                self.branches[move] = Branch(p)
+        legal = [
+            idx for idx, move in enumerate(all_moves)
+            if state.is_valid_move(move)
+            and not is_point_an_eye(state.board, move.point, state.next_player)]
+        self.move_indices = np.array(legal, dtype=np.int64)  # encoder index per slot
+        self.branch_moves = [all_moves[idx] for idx in legal]
+        self.priors = np.asarray(priors, dtype=np.float64)[self.move_indices]
+        self.visits = np.zeros(len(legal), dtype=np.int64)
+        self.total_values = np.zeros(len(legal), dtype=np.float64)
         self.children = {}                        # <2>
+        self._slots = None
+
+    @property
+    def last_move(self):
+        if self.parent is None:
+            return None
+        return self.parent.branch_moves[self.last_slot]
 
     def moves(self):                              # <3>
-        return self.branches.keys()               # <3>
+        return list(self.branch_moves)            # <3>
 
-    def add_child(self, move, child_node):        # <4>
-        self.children[move] = child_node          # <4>
+    def slot(self, move):
+        """Slot of `move`, or None if it is not a legal branch here."""
+        if self._slots is None:
+            self._slots = {m: k for k, m in enumerate(self.branch_moves)}
+        return self._slots.get(move)
 
-    def get_child(self, move):
-        return self.children[move]
+    def add_child(self, slot, child_node):        # <4>
+        self.children[slot] = child_node          # <4>
 
-    def has_child(self, move):                    # <5>
-        return move in self.children              # <5>
+    def get_child(self, slot):
+        return self.children[slot]
+
+    def has_child(self, slot):                    # <5>
+        return slot in self.children              # <5>
 # end::node_class_body[]
 
 # tag::node_record_visit[]
-    def record_visit(self, move, value):
+    def record_visit(self, slot, value):
         self.total_visit_count += 1
-        self.branches[move].visit_count += 1
-        self.branches[move].total_value += value
+        self.visits[slot] += 1
+        self.total_values[slot] += value
 # end::node_record_visit[]
 
+    def visit_count_vector(self, num_moves):
+        """Visit counts for every encoder move index (0 for illegal moves)."""
+        counts = np.zeros(num_moves, dtype=np.int64)
+        counts[self.move_indices] = self.visits
+        return counts
+
 # tag::node_class_helpers[]
+    # Per-move accessors (convenient for inspection; the search uses slots).
     def expected_value(self, move):
-        branch = self.branches[move]
-        if branch.visit_count == 0:
+        k = self.slot(move)
+        if self.visits[k] == 0:
             return 0.0
-        return branch.total_value / branch.visit_count
+        return self.total_values[k] / self.visits[k]
 
     def prior(self, move):
-        return self.branches[move].prior
+        return self.priors[self.slot(move)]
 
     def visit_count(self, move):
-        if move in self.branches:
-            return self.branches[move].visit_count
-        return 0
+        k = self.slot(move)
+        if k is None:
+            return 0
+        return int(self.visits[k])
 # end::node_class_helpers[]
 
 
@@ -92,6 +119,9 @@ class ZeroAgent(Agent):
         self.num_rounds = rounds_per_move
         self.c = c
         self._infer_fn = None
+        # Decode every encoder move index once (hot in the search).
+        self.all_moves = [encoder.decode_move_index(idx)
+                          for idx in range(encoder.num_moves())]
         
     def infer(self, model_input):
         # A compiled tf.function call is several times faster than
@@ -110,64 +140,94 @@ class ZeroAgent(Agent):
 # tag::zero_select_move_defn[]
     def select_move(self, game_state):
 # end::zero_select_move_defn[]
-# tag::zero_walk_down[]
-        root = self.create_node(game_state)           # <1>
+        return self.select_moves([game_state], [self.collector])[0]
 
-        for i in range(self.num_rounds):              # <2>
-            node = root
-            next_move = self.select_branch(node)
-            while next_move is not None and node.has_child(next_move):  # <3>
-                node = node.get_child(next_move)
-                next_move = self.select_branch(node)
+    def select_moves(self, game_states, collectors=None):
+        """Run MCTS for several independent positions at once and return one
+        move per position.
+
+        Each position gets its own search tree, but in every round the leaf
+        positions of all trees are evaluated by the network in a single
+        batched call, which is what makes the GPU worthwhile. `collectors`
+        is an optional list (one entry per position, may be None) of
+        experience collectors to record each root's visit counts into.
+        """
+        if collectors is None:
+            collectors = [None] * len(game_states)
+        roots = self.create_nodes(game_states)                 # <1>
+
+        for i in range(self.num_rounds):                       # <2>
+            # Walk down every tree to a leaf.
+            pending = []
+            for root in roots:
+# tag::zero_walk_down[]
+                node = root
+                slot = self.select_branch(node)
+                while slot is not None and node.has_child(slot):  # <3>
+                    node = node.get_child(slot)
+                    slot = self.select_branch(node)
 # end::zero_walk_down[]
+                if slot is None:
+                    # Terminal position (game over / no legal moves): back
+                    # up the actual result instead of expanding further.
+                    if node.parent is not None:
+                        self.back_up(node.parent, node.last_slot,
+                                     -1 * self.terminal_value(node.state))
+                else:
+                    pending.append((node, slot))
+
+            # Expand all leaves with one batched network evaluation.
+            if pending:
+                new_states = [node.state.apply_move(node.branch_moves[slot])
+                              for node, slot in pending]
+                children = self.create_nodes(
+                    new_states,
+                    slots=[slot for _, slot in pending],
+                    parents=[node for node, _ in pending])
+                for (node, slot), child in zip(pending, children):
+                    self.back_up(node, slot, -1 * child.value)     # <1>
+
+        return [self.finish_search(root, game_state, collector)
+                for root, game_state, collector
+                in zip(roots, game_states, collectors)]
 
 # tag::zero_back_up[]
-            if next_move is None:
-                # Terminal position (game over / no legal moves): back up
-                # the actual result instead of expanding further.
-                move = node.last_move
-                value = -1 * self.terminal_value(node.state)
-                node = node.parent
-                if node is None:
-                    break
-            else:
-                new_state = node.state.apply_move(next_move)
-                child_node = self.create_node(
-                    new_state, move=next_move, parent=node)
-                move = next_move
-                value = -1 * child_node.value         # <1>
-            while node is not None:
-                node.record_visit(move, value)
-                move = node.last_move
-                node = node.parent
-                value = -1 * value
+    @staticmethod
+    def back_up(node, slot, value):
+        """Record `value` (from the point of view of the player to move at
+        `node`) for the branch `slot`, then propagate it up with
+        alternating sign."""
+        while node is not None:
+            node.record_visit(slot, value)
+            slot = node.last_slot
+            node = node.parent
+            value = -1 * value
 # end::zero_back_up[]
 
+    def finish_search(self, root, game_state, collector):
+        """Record the search result and pick the move to play."""
+        visit_counts = root.visit_count_vector(self.encoder.num_moves())
+        if visit_counts.sum() == 0:
+            # Nothing was searched: the game is already over (or there is no
+            # legal move other than filling our own eyes). Passing is the
+            # only sensible answer.
+            return goboard_fast.Move.pass_turn()
 # tag::zero_record_collector[]
-        if self.collector is not None:
+        if collector is not None:
             root_state_tensor = self.encoder.encode(game_state)
-            visit_counts = np.array([
-                root.visit_count(
-                    self.encoder.decode_move_index(idx))
-                for idx in range(self.encoder.num_moves())
-            ])
 #             HHY start
             for i in range(8):
                 new_root_state_tensor = symmetry_reflection_tensor(board_tensor=root_state_tensor,index=i)
                 new_visit_counts = symmetry_reflection_vector(board_vector=visit_counts,index=i,inverse=False)
 
-                self.collector.record_decision(
+                collector.record_decision(
                 new_root_state_tensor, new_visit_counts)
-#             HHY end          
-            
+#             HHY end
+
 # end::zero_record_collector[]
 
 # HHY
-        move_probs = np.array([
-                        root.visit_count(
-                            self.encoder.decode_move_index(idx))/self.num_rounds
-                        for idx in range(self.encoder.num_moves())
-                     ])
+        move_probs = visit_counts / self.num_rounds
         # Prevent move probs from getting stuck at 0 or 1.
         move_probs = np.power(move_probs, 1.0 / self.temperature)
         move_probs = move_probs / np.sum(move_probs)
@@ -175,21 +235,21 @@ class ZeroAgent(Agent):
         move_probs = np.clip(move_probs, eps, 1 - eps)
         # Re-normalize to get another probability distribution.
         move_probs = move_probs / np.sum(move_probs)
-        
+
 
         # Turn the probabilities into a ranked list of moves.
         candidates = np.arange(self.encoder.num_moves())
         ranked_moves = np.random.choice(
             candidates, self.encoder.num_moves(), replace=False, p=move_probs)
         for move_index in ranked_moves:
-            move = self.encoder.decode_move_index(move_index)
+            move = self.all_moves[move_index]
             if game_state.is_valid_move(move):
                 return move
 # HHY
 
 
 # tag::zero_select_max_visit_count[]
-        return max(root.moves(), key=root.visit_count)
+        return root.branch_moves[int(np.argmax(root.visits))]
 # end::zero_select_max_visit_count[]
 
     @staticmethod
@@ -207,55 +267,62 @@ class ZeroAgent(Agent):
 
 # tag::zero_select_branch[]
     def select_branch(self, node):
-        if not node.branches:
+        """Slot of the branch maximizing Q + c * P * sqrt(N_total) / (n + 1),
+        or None if the node has no legal branches. Ties go to the lowest
+        slot, as with Python's max() over the moves in order."""
+        if len(node.visits) == 0:
             return None
         total_n = node.total_visit_count
-
-        def score_branch(move):
-            q = node.expected_value(move)
-            p = node.prior(move)
-            n = node.visit_count(move)
-  
-            return q + self.c * p * np.sqrt(total_n) / (n + 1)
-
-        return max(node.moves(), key=score_branch)             # <1>
+        n = node.visits
+        q = np.divide(node.total_values, n,
+                      out=np.zeros_like(node.total_values), where=n > 0)
+        p = node.priors
+        score = q + self.c * p * np.sqrt(total_n) / (n + 1)
+        return int(np.argmax(score))                           # <1>
 # end::zero_select_branch[]
 
 # tag::zero_create_node[]
-    def create_node(self, game_state, move=None, parent=None):
-        state_tensor = self.encoder.encode(game_state)
-#         HHY        
-        index = np.random.randint(8)
-        new_state_tensor = symmetry_reflection_tensor(board_tensor=state_tensor,index=index)
-        model_input = np.array([new_state_tensor])          # <1>
-        priors, values = self.infer(model_input)
-        priors = priors[0]                                     # <2>
-       
-        priors_tmp = symmetry_reflection_vector(board_vector=priors,index=index,inverse=True)    
-        priors = priors_tmp
-        
-        priors = priors / np.sum(priors)
-        
+    def create_node(self, game_state, slot=None, parent=None):
+        return self.create_nodes([game_state], [slot], [parent])[0]
 
+    def create_nodes(self, game_states, slots=None, parents=None):
+        """Create tree nodes for several positions with one network call.
+        slots[k] is the branch of parents[k] that leads to game_states[k]."""
+        n = len(game_states)
+        if slots is None:
+            slots = [None] * n
+        if parents is None:
+            parents = [None] * n
+#         HHY
+        # Evaluate each position under a random board symmetry, then map
+        # the priors back to the original orientation.
+        indices = np.random.randint(8, size=n)
+        model_input = np.array([
+            symmetry_reflection_tensor(
+                board_tensor=self.encoder.encode(state), index=index)
+            for state, index in zip(game_states, indices)])     # <1>
+        all_priors, all_values = self.infer(model_input)
+
+        nodes = []
+        for k in range(n):
+            priors = symmetry_reflection_vector(
+                board_vector=all_priors[k], index=indices[k], inverse=True)
+            priors = priors / np.sum(priors)
 #         HHY
 
-        # Add Dirichlet noise to the root node.
-        if parent is None:
-            noise = np.random.dirichlet(
-                0.03 * np.ones_like(priors))
-            priors = 0.75 * priors + 0.25 * noise
-        value = values[0][0]                                   # <2>
-        move_priors = {                                        # <3>
-            self.encoder.decode_move_index(idx): p             # <3>
-            for idx, p in enumerate(priors)                    # <3>
-        }                                                      # <3>
-        new_node = ZeroTreeNode(
-            game_state, value,
-            move_priors,
-            parent, move)
-        if parent is not None:
-            parent.add_child(move, new_node)
-        return new_node
+            # Add Dirichlet noise to the root node.
+            if parents[k] is None:
+                noise = np.random.dirichlet(
+                    0.03 * np.ones_like(priors))
+                priors = 0.75 * priors + 0.25 * noise
+            value = all_values[k][0]                           # <2>
+            new_node = ZeroTreeNode(
+                game_states[k], value, priors,
+                parents[k], slots[k], self.all_moves)
+            if parents[k] is not None:
+                parents[k].add_child(slots[k], new_node)
+            nodes.append(new_node)
+        return nodes
 # end::zero_create_node[]
 
 # tag::zero_train[]

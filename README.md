@@ -36,8 +36,14 @@ python init_zero_agent_v2.py bots/my_agent.hdf5          # 9x9 by default
 ## Train
 ```
 python play_train_eval_zero.py --lagent bots/my_agent.hdf5 --ragent bots/my_agent.hdf5 \
-    -d work -l work/log -g 100 -w 2
+    -d work -l work/log -g 1000 -w 7 --gpu-workers 1 -p 32
 ```
+Self-play is batched: each worker plays `-p/--parallel-games` games at once and
+evaluates all their search leaves in one network call. The search itself is
+Python-bound, so use one GPU worker (`--gpu-workers 1`; several processes
+sharing one GPU are slower on Windows) plus single-threaded CPU workers on the
+remaining cores (`-w` = total workers). Workers take batches of games from a
+shared queue, so faster workers simply play more games.
 Each iteration plays `--rounds-per-eval` (default 10) rounds of `-g` self-play
 games, trains on each round, then plays `--eval-games` (default 100) against the
 reference agent; at >= 55% wins the learner becomes the new reference

@@ -121,17 +121,115 @@ def eval_simulate_game(
     )
 
 
+def self_play_temperature(num_moves):
+    # Explore in the opening, then favor the best-looking move.
+    return 1.0 if num_moves < 16 else 0.05
+
+
+def eval_temperature(num_moves):
+    return 0.05
+
+
+def play_games_batched(agent1, agent2, num_games, board_size,
+                       temperature_fn, collect=False):
+    """Play `num_games` games between agent1 and agent2 at the same time.
+
+    agent1 plays black in even-numbered games and white in odd ones. All games
+    advance one move per step; each agent searches all the games where it is
+    to move together, so its network evaluates their positions in batches.
+    Returns (records, agent1_colors, collectors) where collectors is a list of
+    (agent1 collector, agent2 collector) per game, or None if not collecting.
+    """
+    games = [GameState.new_game(board_size) for _ in range(num_games)]
+    agent1_colors = [Player.black if i % 2 == 0 else Player.white
+                     for i in range(num_games)]
+    collectors = None
+    if collect:
+        collectors = []
+        for _ in range(num_games):
+            pair = (zero.ZeroExperienceCollector(),
+                    zero.ZeroExperienceCollector())
+            for c in pair:
+                c.begin_episode()
+            collectors.append(pair)
+    moves = [[] for _ in range(num_games)]
+    max_moves = 2 * board_size * board_size
+
+    num_moves = 0
+    active = list(range(num_games))
+    while active:
+        temperature = temperature_fn(num_moves)
+        for agent_idx, agent in enumerate((agent1, agent2)):
+            idx = [i for i in active
+                   if (games[i].next_player == agent1_colors[i]) == (agent_idx == 0)]
+            if not idx:
+                continue
+            agent.set_temperature(temperature)
+            chosen = agent.select_moves(
+                [games[i] for i in idx],
+                [collectors[i][agent_idx] for i in idx] if collect else None)
+            for i, move in zip(idx, chosen):
+                moves[i].append(move)
+                games[i] = games[i].apply_move(move)
+        num_moves += 1
+        active = [i for i in active
+                  if not games[i].is_over() and num_moves < max_moves]
+
+    records = []
+    for i in range(num_games):
+        result = scoring.compute_game_result(games[i])
+        records.append(GameRecord(moves=moves[i], winner=result.winner,
+                                  margin=result.winning_margin))
+        print('Game %d/%d: %d moves, %s, agent %d wins' % (
+            i + 1, num_games, len(moves[i]), result,
+            1 if result.winner == agent1_colors[i] else 2))
+    return records, agent1_colors, collectors
+
+
 def get_temp_file():
     fd, fname = tempfile.mkstemp(prefix='dlgo-train')
     os.close(fd)
     return fname
 
 
+def configure_worker(use_gpu):
+    """Per-process TensorFlow setup for self-play / evaluation workers.
+
+    GPU workers share the GPU via memory growth. CPU workers hide the GPU
+    and use a single TF thread each: the MCTS is Python-bound, so several
+    single-threaded CPU workers scale across cores, while multiple processes
+    sharing the GPU (on Windows) or large TF thread pools slow each other down.
+    Must run before TensorFlow does any work in this process.
+    """
+    import tensorflow as tf
+    if use_gpu:
+        kerasutil.set_gpu_memory_target(1.0)
+    else:
+        tf.config.set_visible_devices([], 'GPU')
+        tf.config.threading.set_intra_op_parallelism_threads(1)
+        tf.config.threading.set_inter_op_parallelism_threads(1)
+
+
+def claim_games(counter, num_games, batch_size):
+    """Take up to batch_size of the remaining games from the shared counter.
+    Returns (first_game_index, count); count is 0 when all are claimed."""
+    with counter.get_lock():
+        start = counter.value
+        count = max(0, min(batch_size, num_games - start))
+        counter.value = start + count
+    return start, count
+
+
 def do_self_play(board_size, agent1_filename, agent2_filename,
                  num_games,
                  experience_filename,
-                 gpu_frac):
-    kerasutil.set_gpu_memory_target(gpu_frac)
+                 counter,
+                 parallel_games=32,
+                 use_gpu=True):
+    """Worker: play self-play games in batches of `parallel_games`, taking
+    batches from the shared `counter` until `num_games` games have been
+    claimed across all workers, and save the experience it collected."""
+    configure_worker(use_gpu)
 
     random.seed(int(time.time()) + os.getpid())
     np.random.seed(int(time.time()) + os.getpid())
@@ -139,46 +237,39 @@ def do_self_play(board_size, agent1_filename, agent2_filename,
     agent1 = load_agent(agent1_filename)
     agent2 = load_agent(agent2_filename)
 
-    collector1 = zero.ZeroExperienceCollector()
-    collector2 = zero.ZeroExperienceCollector()
+    all_collectors = []
+    while True:
+        start, batch = claim_games(counter, num_games, parallel_games or num_games)
+        if batch == 0:
+            break
+        print('[%s worker %d] Simulating games %d-%d of %d...' % (
+            'GPU' if use_gpu else 'CPU', os.getpid(),
+            start + 1, start + batch, num_games))
+        records, colors1, collectors = play_games_batched(
+            agent1, agent2, batch, board_size,
+            self_play_temperature, collect=True)
+        for record, color1, (collector1, collector2) in zip(
+                records, colors1, collectors):
+            reward1 = 1 if record.winner == color1 else -1
+            collector1.complete_episode(reward=reward1)
+            collector2.complete_episode(reward=-reward1)
+            all_collectors.extend([collector1, collector2])
 
-    color1 = Player.black
-    for i in range(num_games):
-        print('Simulating game %d/%d...' % (i + 1, num_games))
-        collector1.begin_episode()
-        collector2.begin_episode()
-        agent1.set_collector(collector1)
-        agent2.set_collector(collector2)
-
-        if color1 == Player.black:
-            black_player, white_player = agent1, agent2
-        else:
-            white_player, black_player = agent1, agent2
-            
-        game_record = simulate_game(black_player, white_player, board_size)
-        
-        if game_record.winner == color1:
-            print('Agent 1 wins.')
-            collector1.complete_episode(reward=1)
-            collector2.complete_episode(reward=-1)
-        else:
-            print('Agent 2 wins.')
-            collector1.complete_episode(reward=-1)
-            collector2.complete_episode(reward=1)
-        color1 = color1.other
-
-    experience = zero.combine_experience([collector1, collector2])
+    all_collectors = [c for c in all_collectors if c.states]
+    if not all_collectors:
+        return  # this worker got no games; its file stays empty
+    experience = zero.combine_experience(all_collectors)
     print('Saving experience buffer to %s\n' % experience_filename)
     with h5py.File(experience_filename, 'w') as experience_outf:
         experience.serialize(experience_outf)
 
 
 def generate_experience(learning_agent, reference_agent, exp_file,
-                        num_games, board_size, num_workers):
+                        num_games, board_size, num_workers,
+                        parallel_games=32, gpu_workers=1):
     experience_files = []
     workers = []
-    gpu_frac = 1 / float(num_workers)
-    games_per_worker = num_games // num_workers
+    counter = multiprocessing.Value('i', 0)
     for i in range(num_workers):
         filename = get_temp_file()
         experience_files.append(filename)
@@ -188,9 +279,11 @@ def generate_experience(learning_agent, reference_agent, exp_file,
                 board_size,
                 learning_agent,
                 reference_agent,
-                games_per_worker,
+                num_games,
                 filename,
-                gpu_frac,
+                counter,
+                parallel_games,
+                i < gpu_workers,
             )
         )
         worker.start()
@@ -200,17 +293,19 @@ def generate_experience(learning_agent, reference_agent, exp_file,
     print('Waiting for workers...')
     for worker in workers:
         worker.join()
+    failed = [w.exitcode for w in workers if w.exitcode != 0]
+    if failed:
+        raise RuntimeError('%d self-play worker(s) failed' % len(failed))
 
-    # Merge experience buffers.
+    # Merge experience buffers (workers that got no games left empty files).
     print('Merging experience buffers...')
-    first_filename = experience_files[0]
-    other_filenames = experience_files[1:]
-    with h5py.File(first_filename, 'r') as expf:
-        combined_buffer = zero.load_experience(expf)
-    for filename in other_filenames:
+    buffers = []
+    for filename in experience_files:
+        if os.path.getsize(filename) == 0:
+            continue
         with h5py.File(filename, 'r') as expf:
-            next_buffer = zero.load_experience(expf)
-        combined_buffer = zero.combine_experience([combined_buffer, next_buffer])
+            buffers.append(zero.load_experience(expf))
+    combined_buffer = zero.combine_experience(buffers)
     print('Saving into %s...' % exp_file)
     with h5py.File(exp_file, 'w') as experience_outf:
         combined_buffer.serialize(experience_outf)
@@ -283,10 +378,11 @@ def play_games(args):
         color1 = color1.other
     return wins, losses
 
-def eval_play_games(args):
-    agent1_fname, agent2_fname, num_games, board_size, gpu_frac = args
-
-    kerasutil.set_gpu_memory_target(gpu_frac)
+def eval_worker(agent1_fname, agent2_fname, num_games, board_size,
+                counter, results, parallel_games=32, use_gpu=True):
+    """Worker: play evaluation games (agent1 vs agent2) in batches claimed
+    from the shared counter; put (wins, losses) for agent1 on `results`."""
+    configure_worker(use_gpu)
 
     random.seed(int(time.time()) + os.getpid())
     np.random.seed(int(time.time()) + os.getpid())
@@ -295,50 +391,48 @@ def eval_play_games(args):
     agent2 = load_agent(agent2_fname)
 
     wins, losses = 0, 0
-    color1 = Player.black
-    for i in range(num_games):
-        print('Simulating game %d/%d...' % (i + 1, num_games))
-        if color1 == Player.black:
-            black_player, white_player = agent1, agent2
-        else:
-            white_player, black_player = agent1, agent2
-            
-        game_record = eval_simulate_game(black_player, white_player, board_size)
-        
-        if game_record.winner == color1:
-            print('Agent 1 wins')
-            wins += 1
-        else:
-            print('Agent 2 wins')
-            losses += 1
-        print('Agent 1 record: %d/%d' % (wins, wins + losses))
-        color1 = color1.other
-    return wins, losses
+    while True:
+        start, batch = claim_games(counter, num_games, parallel_games or num_games)
+        if batch == 0:
+            break
+        print('[%s worker %d] Evaluating games %d-%d of %d...' % (
+            'GPU' if use_gpu else 'CPU', os.getpid(),
+            start + 1, start + batch, num_games))
+        records, colors1, _ = play_games_batched(
+            agent1, agent2, batch, board_size, eval_temperature)
+        for record, color1 in zip(records, colors1):
+            if record.winner == color1:
+                wins += 1
+            else:
+                losses += 1
+        print('Agent 1 record (this worker): %d/%d' % (wins, wins + losses))
+    results.put((wins, losses))
 
 
 def evaluate(learning_agent, reference_agent,
-             num_games, num_workers, board_size):
-    games_per_worker = num_games // num_workers
-    gpu_frac = 1 / float(num_workers)
-    pool = multiprocessing.Pool(num_workers)
-    worker_args = [
-        (
-            learning_agent, reference_agent,
-            games_per_worker, board_size, gpu_frac,
-        )
-        for _ in range(num_workers)
-    ]
-    game_results = pool.map(eval_play_games, worker_args)
+             num_games, num_workers, board_size,
+             parallel_games=32, gpu_workers=1):
+    counter = multiprocessing.Value('i', 0)
+    results = multiprocessing.Queue()
+    workers = []
+    for i in range(num_workers):
+        worker = multiprocessing.Process(
+            target=eval_worker,
+            args=(learning_agent, reference_agent, num_games, board_size,
+                  counter, results, parallel_games, i < gpu_workers))
+        worker.start()
+        workers.append(worker)
+    # Collect results before joining (a process with queued data cannot exit
+    # until it is read).
+    game_results = [results.get() for _ in workers]
+    for worker in workers:
+        worker.join()
 
-    total_wins, total_losses = 0, 0
-    for wins, losses in game_results:
-        total_wins += wins
-        total_losses += losses
+    total_wins = sum(w for w, _ in game_results)
+    total_losses = sum(l for _, l in game_results)
     print('FINAL RESULTS:')
     print('Learner: %d' % total_wins)
     print('Refrnce: %d' % total_losses)
-    pool.close()
-    pool.join()
     return total_wins
 
 
@@ -358,6 +452,12 @@ def main():
     parser.add_argument('--eval-games', type=int, default=100)
     parser.add_argument('--max-iterations', type=int, default=0,
                         help='stop after this many evaluations (0 = run forever)')
+    parser.add_argument('--parallel-games', '-p', type=int, default=32,
+                        help='games each worker plays simultaneously; their '
+                             'network evaluations are batched (0 = all at once)')
+    parser.add_argument('--gpu-workers', type=int, default=1,
+                        help='how many of the --num-workers use the GPU; the '
+                             'rest run single-threaded on the CPU')
 
     args = parser.parse_args()
     os.makedirs(args.work_dir, exist_ok=True)
@@ -389,7 +489,9 @@ def main():
                 experience_file,
                 num_games=args.games_per_batch,
                 board_size=args.board_size,
-                num_workers=args.num_workers)
+                num_workers=args.num_workers,
+                parallel_games=args.parallel_games,
+                gpu_workers=args.gpu_workers)
             train_on_experience(
                 training_agent, tmp_agent, experience_file,
                 lr=args.lr, batch_size=args.bs)
@@ -400,8 +502,10 @@ def main():
             training_agent, reference_agent,
             num_games=args.eval_games,
             num_workers=args.num_workers,
-            board_size=args.board_size)
-        num_eval = (args.eval_games // args.num_workers) * args.num_workers
+            board_size=args.board_size,
+            parallel_games=args.parallel_games,
+            gpu_workers=args.gpu_workers)
+        num_eval = args.eval_games
         print('Won %d / %d games (%.3f)' % (
             wins, num_eval, float(wins) / num_eval))
         logf.write('Won %d / %d games (%.3f)\n' % (
