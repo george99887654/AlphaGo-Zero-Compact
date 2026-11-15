@@ -7,6 +7,8 @@ DLGo/playzero.ipynb
 .DS_Store
 DLGo/bots/
 DLGo/log
+DLGo/work/
+.venv/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

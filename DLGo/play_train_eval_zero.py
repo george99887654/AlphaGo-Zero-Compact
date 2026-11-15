@@ -346,14 +346,20 @@ def main():
     parser.add_argument('--lagent', required=True)
     parser.add_argument('--ragent', required=True)
     parser.add_argument('--games-per-batch', '-g', type=int, default=1000)
-    parser.add_argument('--work-dir', '-d')
+    parser.add_argument('--work-dir', '-d', required=True)
     parser.add_argument('--num-workers', '-w', type=int, default=1)
-    parser.add_argument('--board-size', '-b', type=int, default=19)
+    parser.add_argument('--board-size', '-b', type=int, default=9)
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--bs', type=int, default=512)
-    parser.add_argument('--log-file', '-l')
+    parser.add_argument('--log-file', '-l', required=True)
+    parser.add_argument('--rounds-per-eval', type=int, default=10,
+                        help='self-play + train rounds between evaluations')
+    parser.add_argument('--eval-games', type=int, default=100)
+    parser.add_argument('--max-iterations', type=int, default=0,
+                        help='stop after this many evaluations (0 = run forever)')
 
     args = parser.parse_args()
+    os.makedirs(args.work_dir, exist_ok=True)
 
     logf = open(args.log_file, 'a')
     logf.write('----------------------\n')
@@ -362,21 +368,23 @@ def main():
     logf.write('Referencing from %s at %s\n' % (
         args.ragent, datetime.datetime.now()))
 
-    learning_agent = args.lagent
     reference_agent = args.ragent
     experience_file = os.path.join(args.work_dir, 'zero_exp_temp.hdf5')
     tmp_agent = os.path.join(args.work_dir, 'zero_agent_temp.hdf5')
-    working_agent = os.path.join(args.work_dir, 'zero_agent_cur.hdf5')
+    # training_agent is the single, continuously-updated learner: it plays
+    # the self-play games, every training round starts from its latest
+    # weights and writes back to it, and it is the agent that is evaluated.
     training_agent = os.path.join(args.work_dir, 'zero_agent_train.hdf5')
     total_games = 0
-    shutil.copy(learning_agent, training_agent)
+    iteration = 0
+    shutil.copy(args.lagent, training_agent)
     while True:
         print('Reference: %s' % (reference_agent,))
         logf.write('Total games so far %d\n' % (total_games,))
-        for i in range(10):
-            print('Round %d/10' % i)
+        for i in range(args.rounds_per_eval):
+            print('Round %d/%d' % (i + 1, args.rounds_per_eval))
             generate_experience(
-                learning_agent, reference_agent,
+                training_agent, reference_agent,
                 experience_file,
                 num_games=args.games_per_batch,
                 board_size=args.board_size,
@@ -384,32 +392,35 @@ def main():
             train_on_experience(
                 training_agent, tmp_agent, experience_file,
                 lr=args.lr, batch_size=args.bs)
+            shutil.move(tmp_agent, training_agent)
             total_games += args.games_per_batch
-        
+
         wins = evaluate(
             training_agent, reference_agent,
-            num_games=100,
+            num_games=args.eval_games,
             num_workers=args.num_workers,
             board_size=args.board_size)
-        print('Won %d / 100 games (%.3f)' % (
-            wins, float(wins) / 100.0))
-        logf.write('Won %d / 100 games (%.3f)\n' % (
-            wins, float(wins) / 100.0))
-        
-        shutil.copy(tmp_agent, working_agent)
-        
-        if wins >= 55:
+        num_eval = (args.eval_games // args.num_workers) * args.num_workers
+        print('Won %d / %d games (%.3f)' % (
+            wins, num_eval, float(wins) / num_eval))
+        logf.write('Won %d / %d games (%.3f)\n' % (
+            wins, num_eval, float(wins) / num_eval))
+
+        if wins >= 0.55 * num_eval:
             next_filename = os.path.join(
                 args.work_dir,
                 'zero_agent_v2_%08d.hdf5' % (total_games,))
-            shutil.move(tmp_agent, next_filename)
-            learning_agent = next_filename
+            shutil.copy(training_agent, next_filename)
             reference_agent = next_filename
             logf.write('New reference is %s\n' % next_filename)
         else:
             print('Keep learning\n')
-        
+
         logf.flush()
+        iteration += 1
+        if args.max_iterations and iteration >= args.max_iterations:
+            break
+    logf.close()
 
 
 if __name__ == '__main__':

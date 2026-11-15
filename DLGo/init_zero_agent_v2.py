@@ -2,9 +2,9 @@ import argparse
 
 import h5py
 
-from keras.layers import Activation, BatchNormalization
-from keras.layers import Conv2D, Dense, Flatten, Input
-from keras.models import Model
+from tensorflow.keras.layers import Activation, BatchNormalization
+from tensorflow.keras.layers import Conv2D, Dense, Flatten, Input
+from tensorflow.keras.models import Model
 import dlgo.networks
 from dlgo import zero
 from dlgo import encoders
@@ -13,7 +13,7 @@ from dlgo import networks
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--board-size', type=int, default=19)
+    parser.add_argument('--board-size', type=int, default=9)
 #     parser.add_argument('--network', default='large')
 #     parser.add_argument('--hidden-size', type=int, default=512)
     parser.add_argument('output_file')

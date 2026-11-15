@@ -3,8 +3,8 @@ import tempfile
 import os
 
 import h5py
-import keras
-from keras.models import load_model, save_model
+from tensorflow import keras
+from tensorflow.keras.models import load_model, save_model
 
 
 def save_model_to_hdf5_group(model, f):
@@ -14,7 +14,7 @@ def save_model_to_hdf5_group(model, f):
     tempfd, tempfname = tempfile.mkstemp(prefix='tmp-kerasmodel')
     try:
         os.close(tempfd)
-        save_model(model, tempfname)
+        save_model(model, tempfname, save_format='h5')
         serialized_model = h5py.File(tempfname, 'r')
         root_item = serialized_model.get('/')
         serialized_model.copy(root_item, f, 'kerasmodel')
@@ -53,12 +53,13 @@ def set_gpu_memory_target(frac):
     This function does nothing if Keras is using a backend other than
     Tensorflow.
     """
-    if keras.backend.backend() != 'tensorflow':
-        return
-    # Do the import here, not at the top, in case Tensorflow is not
-    # installed at all.
+    # TF2: let each process grow its GPU memory on demand so several
+    # worker processes can share one GPU. `frac` is kept for API
+    # compatibility. Must run before TensorFlow touches the GPU.
     import tensorflow as tf
-#     from keras.backend.tensorflow_backend import set_session
-    config = tf.compat.v1.ConfigProto()
-    config.gpu_options.per_process_gpu_memory_fraction = frac
-    tf.compat.v1.keras.backend.set_session(tf.compat.v1.Session(config=config))
+    for gpu in tf.config.list_physical_devices('GPU'):
+        try:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        except RuntimeError:
+            # GPU already initialized in this process; keep current config.
+            pass

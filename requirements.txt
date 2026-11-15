@@ -1,9 +1,9 @@
-numpy==1.18.5
-keras==2.3.1
-flask==1.1.2
-flask-cors==3.0.8
-future==0.18.2
-h5py==2.10.0
-tensorflow==2.2.0
-six==1.15.0
-gomill==0.8.3
+# Python 3.10 (TensorFlow 2.10 is the last release with native Windows GPU support)
+tensorflow==2.10.1
+numpy==1.23.5
+h5py==3.7.0
+protobuf==3.19.6
+flask==2.2.5
+werkzeug==2.2.3
+flask-cors==3.0.10
+six==1.16.0

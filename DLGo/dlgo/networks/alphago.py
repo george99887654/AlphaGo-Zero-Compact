@@ -1,7 +1,7 @@
 # tag::alphago_base[]
-from keras.models import Sequential
-from keras.layers.core import Dense, Flatten
-from keras.layers.convolutional import Conv2D
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Flatten
+from tensorflow.keras.layers import Conv2D
 
 
 def alphago_model(input_shape, is_policy_net=False,  # <1>

@@ -1,9 +1,11 @@
 import numpy as np
-from keras.optimizers import SGD
-from keras.optimizers import Adam
+import tensorflow as tf
+from tensorflow.keras.optimizers import SGD
+from tensorflow.keras.optimizers import Adam
 
 from .. import kerasutil
 from .. import goboard_fast
+from .. import scoring
 from .. import encoders
 
 from dlgo.agent.helpers_fast import is_point_an_eye 
@@ -46,6 +48,9 @@ class ZeroTreeNode:
     def add_child(self, move, child_node):        # <4>
         self.children[move] = child_node          # <4>
 
+    def get_child(self, move):
+        return self.children[move]
+
     def has_child(self, move):                    # <5>
         return move in self.children              # <5>
 # end::node_class_body[]
@@ -86,7 +91,19 @@ class ZeroAgent(Agent):
 
         self.num_rounds = rounds_per_move
         self.c = c
+        self._infer_fn = None
         
+    def infer(self, model_input):
+        # A compiled tf.function call is several times faster than
+        # model.predict / predict_on_batch for single positions in TF2.
+        if self._infer_fn is None:
+            model = self.model
+            self._infer_fn = tf.function(
+                lambda x: model(x, training=False), reduce_retracing=True)
+        priors, values = self._infer_fn(
+            tf.convert_to_tensor(model_input, dtype=tf.float32))
+        return priors.numpy(), values.numpy()
+
     def set_temperature(self, temperature):
         self.temperature = temperature
 
@@ -99,18 +116,26 @@ class ZeroAgent(Agent):
         for i in range(self.num_rounds):              # <2>
             node = root
             next_move = self.select_branch(node)
-            while node.has_child(next_move):          # <3>
+            while next_move is not None and node.has_child(next_move):  # <3>
                 node = node.get_child(next_move)
                 next_move = self.select_branch(node)
 # end::zero_walk_down[]
 
 # tag::zero_back_up[]
-            new_state = node.state.apply_move(next_move)
-            child_node = self.create_node(
-                new_state, parent=node)
-
-            move = next_move
-            value = -1 * child_node.value             # <1>
+            if next_move is None:
+                # Terminal position (game over / no legal moves): back up
+                # the actual result instead of expanding further.
+                move = node.last_move
+                value = -1 * self.terminal_value(node.state)
+                node = node.parent
+                if node is None:
+                    break
+            else:
+                new_state = node.state.apply_move(next_move)
+                child_node = self.create_node(
+                    new_state, move=next_move, parent=node)
+                move = next_move
+                value = -1 * child_node.value         # <1>
             while node is not None:
                 node.record_visit(move, value)
                 move = node.last_move
@@ -167,11 +192,23 @@ class ZeroAgent(Agent):
         return max(root.moves(), key=root.visit_count)
 # end::zero_select_max_visit_count[]
 
+    @staticmethod
+    def terminal_value(game_state):
+        """+1 if the player to move in a finished game_state has won, else -1."""
+        if game_state.is_over():
+            result = scoring.compute_game_result(game_state)
+            return 1.0 if result.winner == game_state.next_player else -1.0
+        # No legal non-eye moves but game not over (should not happen,
+        # since passing is always allowed); treat as neutral.
+        return 0.0
+
     def set_collector(self, collector):
         self.collector = collector
 
 # tag::zero_select_branch[]
     def select_branch(self, node):
+        if not node.branches:
+            return None
         total_n = node.total_visit_count
 
         def score_branch(move):
@@ -191,7 +228,7 @@ class ZeroAgent(Agent):
         index = np.random.randint(8)
         new_state_tensor = symmetry_reflection_tensor(board_tensor=state_tensor,index=index)
         model_input = np.array([new_state_tensor])          # <1>
-        priors, values = self.model.predict(model_input)
+        priors, values = self.infer(model_input)
         priors = priors[0]                                     # <2>
        
         priors_tmp = symmetry_reflection_vector(board_vector=priors,index=index,inverse=True)    
@@ -233,12 +270,13 @@ class ZeroAgent(Agent):
         action_target = experience.visit_counts / visit_sums    # <2>
 #         HHY
         # Prevent move probs from getting stuck at 0 or 1.
+        # Normalize each example (row) separately, not over the whole batch.
         move_probs = np.power(action_target, 1.0 / self.temperature)
-        move_probs = move_probs / np.sum(move_probs)
+        move_probs = move_probs / np.sum(move_probs, axis=1, keepdims=True)
         eps = 1e-6
         move_probs = np.clip(move_probs, eps, 1 - eps)
         # Re-normalize to get another probability distribution.
-        move_probs = move_probs / np.sum(move_probs)
+        move_probs = move_probs / np.sum(move_probs, axis=1, keepdims=True)
         action_target = move_probs
 #         HHY
         value_target = experience.rewards
@@ -283,120 +321,48 @@ def load_zero_agent(h5file):
     return ZeroAgent(model, encoder, rounds_per_move=100, c=2.0)
 
 # HHY start
-
-def symmetry_reflection_tensor(board_tensor,index=0):    
-    new_state_tensor = np.zeros(np.shape(board_tensor))
-    
-
+# The 8 symmetries of the square board (dihedral group D4), applied to the
+# last two axes. Index meanings match the original hand-written loops:
+#   0 identity, 1 flip rows, 2 flip cols, 3 rotate 180, 4 transpose,
+#   5 rotate 90 clockwise, 6 rotate 90 counter-clockwise, 7 anti-transpose.
+def _sym(a, index):
     if index == 0:
-        new_state_tensor = board_tensor  
-        
-    elif index == 1:
-        for r in range(9):
-            for c in range(9):
-                new_state_tensor[:,r,c] = board_tensor[:,9-r-1,c]
+        return a
+    if index == 1:
+        return np.flip(a, axis=-2)
+    if index == 2:
+        return np.flip(a, axis=-1)
+    if index == 3:
+        return np.flip(a, axis=(-2, -1))
+    if index == 4:
+        return np.swapaxes(a, -2, -1)
+    if index == 5:
+        return np.rot90(a, k=-1, axes=(-2, -1))
+    if index == 6:
+        return np.rot90(a, k=1, axes=(-2, -1))
+    if index == 7:
+        return np.flip(np.swapaxes(a, -2, -1), axis=(-2, -1))
+    raise ValueError('symmetry index must be in 0..7')
 
-    elif index == 2:
-        for r in range(9):
-            for c in range(9):
-                new_state_tensor[:,r,c] = board_tensor[:,r,9-c-1]        
 
-    elif index == 3:        
-        for r in range(9):
-            for c in range(9):
-                new_state_tensor[:,r,c] = board_tensor[:,9-r-1,9-c-1]        
-        
-    elif index == 4:        
-        for r in range(9):
-            for c in range(9):
-                new_state_tensor[:,r,c] = board_tensor[:,c,r]        
-        
-    elif index == 5:        
-        for r in range(9):
-            for c in range(9):
-                new_state_tensor[:,r,c] = board_tensor[:,9-c-1,r]        
-        
-    elif index == 6:        
-        for r in range(9):
-            for c in range(9):
-                new_state_tensor[:,r,c] = board_tensor[:,c,9-r-1]
-        
-    elif index == 7:        
-        for r in range(9):
-            for c in range(9):
-                new_state_tensor[:,r,c] = board_tensor[:,9-c-1,9-r-1]
-    
-            
-    return new_state_tensor
-    
-    
-    
-def symmetry_reflection_vector(board_vector,index=0,inverse=False):
-    """
-    5,6 swap
-    """
-#     print(board_vector)
-    board_vector2 = board_vector.flatten()
-    v_tmp = board_vector2[:-1]
-    v_pass = board_vector2[-1:]
-    tmp = v_tmp.reshape((1,9,9))
-    new_tmp = np.zeros((1,9,9))
+# Only the two 90-degree rotations are not their own inverse.
+_INVERSE = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 6, 6: 5, 7: 7}
 
-    if index == 0:
-        new_tmp = tmp  
-        
-    elif index == 1:
-        for r in range(9):
-            for c in range(9):
-                new_tmp[:,r,c] = tmp[:,9-r-1,c]
 
-    elif index == 2:
-        for r in range(9):
-            for c in range(9):
-                new_tmp[:,r,c] = tmp[:,r,9-c-1]        
+def symmetry_reflection_tensor(board_tensor, index=0):
+    """Apply symmetry `index` to a (planes, N, N) board tensor."""
+    return np.ascontiguousarray(_sym(np.asarray(board_tensor), index))
 
-    elif index == 3:        
-        for r in range(9):
-            for c in range(9):
-                new_tmp[:,r,c] = tmp[:,9-r-1,9-c-1]        
-        
-    elif index == 4:        
-        for r in range(9):
-            for c in range(9):
-                new_tmp[:,r,c] = tmp[:,c,r]        
-        
-    elif index == 5 and inverse == True:        
-        for r in range(9):
-            for c in range(9):
-                new_tmp[:,r,c] = tmp[:,c,9-r-1]
-                
-    elif index == 5 and inverse == False:        
-        for r in range(9):
-            for c in range(9):
-                new_tmp[:,r,c] = tmp[:,9-c-1,r]
-                
-    elif index == 6 and inverse == True:        
-        for r in range(9):
-            for c in range(9):
-                new_tmp[:,r,c] = tmp[:,9-c-1,r]
-                
-    elif index == 6 and inverse == False:        
-        for r in range(9):
-            for c in range(9):
-                new_tmp[:,r,c] = tmp[:,c,9-r-1]
-        
-    elif index == 7:        
-        for r in range(9):
-            for c in range(9):
-                new_tmp[:,r,c] = tmp[:,9-c-1,9-r-1]
-                
-    v_tmp = new_tmp.flatten()        
-    v = np.concatenate([v_tmp,v_pass])
-    vector = v.reshape(9*9+1)
-#     print(v)
 
-    return vector
-    
+def symmetry_reflection_vector(board_vector, index=0, inverse=False):
+    """Apply symmetry `index` (or its inverse) to an N*N+1 move vector.
+    The final entry (pass) is left unchanged."""
+    v = np.asarray(board_vector).flatten()
+    n = int(round(np.sqrt(v.size - 1)))
+    board = v[:-1].reshape((n, n))
+    idx = _INVERSE[index] if inverse else index
+    return np.concatenate([_sym(board, idx).flatten(), v[-1:]])
+
 # HHY end
 
 

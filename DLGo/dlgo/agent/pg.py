@@ -1,7 +1,7 @@
 """Policy gradient learning."""
 import numpy as np
-from keras import backend as K
-from keras.optimizers import SGD
+from tensorflow.keras import backend as K
+from tensorflow.keras.optimizers import SGD
 
 from dlgo.agent.base import Agent
 from dlgo.agent.helpers import is_point_an_eye
@@ -96,7 +96,7 @@ class PolicyAgent(Agent):
         kerasutil.save_model_to_hdf5_group(self._model, h5file['model'])
 
     def train(self, experience, lr=0.0000001, clipnorm=1.0, batch_size=512):
-        opt = SGD(lr=lr, clipnorm=clipnorm)
+        opt = SGD(learning_rate=lr, clipnorm=clipnorm)
         self._model.compile(loss='categorical_crossentropy', optimizer=opt)
 
         n = experience.states.shape[0]

@@ -348,7 +348,7 @@ def main():
     parser.add_argument('--games-per-batch', '-g', type=int, default=1000)
     parser.add_argument('--work-dir', '-d')
     parser.add_argument('--num-workers', '-w', type=int, default=1)
-    parser.add_argument('--board-size', '-b', type=int, default=19)
+    parser.add_argument('--board-size', '-b', type=int, default=9)
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--bs', type=int, default=512)
     parser.add_argument('--log-file', '-l')
