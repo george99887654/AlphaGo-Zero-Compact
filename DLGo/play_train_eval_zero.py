@@ -11,6 +11,7 @@ from collections import namedtuple
 import h5py
 import numpy as np
 
+from dlgo import elo
 from dlgo import kerasutil
 from dlgo import scoring
 from dlgo import zero
@@ -436,6 +437,46 @@ def evaluate(learning_agent, reference_agent,
     return total_wins
 
 
+def save_generation(work_dir, agent_file, iteration):
+    name = 'gen_%04d' % iteration
+    shutil.copy(agent_file, os.path.join(work_dir, name + '.hdf5'))
+    return name
+
+
+def run_elo_matches(args, generations, training_agent, iteration,
+                    total_games, logf):
+    """Snapshot the learner as a new generation, play it against
+    generation 0 and the most recent generations, and refresh the ratings."""
+    name = save_generation(args.work_dir, training_agent, iteration)
+    opponents = [generations[0]] + generations[-args.elo_opponents:]
+    opponents = list(dict.fromkeys(opponents))      # dedupe, keep order
+    matches_file = os.path.join(args.work_dir, 'elo_matches.csv')
+    for opp in opponents:
+        wins = evaluate(
+            os.path.join(args.work_dir, name + '.hdf5'),
+            os.path.join(args.work_dir, opp + '.hdf5'),
+            num_games=args.elo_games,
+            num_workers=args.num_workers,
+            board_size=args.board_size,
+            parallel_games=args.parallel_games,
+            gpu_workers=args.gpu_workers)
+        losses = args.elo_games - wins
+        elo.append_match(matches_file, iteration, total_games,
+                         name, opp, wins, losses)
+        logf.write('Elo match %s vs %s: %d-%d\n' % (name, opp, wins, losses))
+    generations.append(name)
+
+    matches = elo.load_matches(matches_file)
+    ratings = elo.fit_ratings(matches, anchor=generations[0])
+    rows = elo.write_ratings(os.path.join(args.work_dir, 'elo.csv'),
+                             ratings, matches)
+    elo.write_html_report(os.path.join(args.work_dir, 'elo_report.html'),
+                          rows, matches)
+    print('Elo of %s: %.0f (gen 0 = 0)' % (name, ratings[name]))
+    logf.write('Elo of %s after %d games: %.0f\n' % (
+        name, total_games, ratings[name]))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--lagent', required=True)
@@ -455,6 +496,12 @@ def main():
     parser.add_argument('--parallel-games', '-p', type=int, default=32,
                         help='games each worker plays simultaneously; their '
                              'network evaluations are batched (0 = all at once)')
+    parser.add_argument('--elo-games', type=int, default=0,
+                        help='after each iteration, play this many games '
+                             'against generation 0 and the previous '
+                             '--elo-opponents generations and update '
+                             'elo.csv / elo_report.html (0 = off)')
+    parser.add_argument('--elo-opponents', type=int, default=2)
     parser.add_argument('--gpu-workers', type=int, default=1,
                         help='how many of the --num-workers use the GPU; the '
                              'rest run single-threaded on the CPU')
@@ -479,6 +526,9 @@ def main():
     total_games = 0
     iteration = 0
     shutil.copy(args.lagent, training_agent)
+    generations = []      # snapshot names, in order, for Elo matches
+    if args.elo_games:
+        generations.append(save_generation(args.work_dir, training_agent, 0))
     while True:
         print('Reference: %s' % (reference_agent,))
         logf.write('Total games so far %d\n' % (total_games,))
@@ -521,8 +571,12 @@ def main():
         else:
             print('Keep learning\n')
 
-        logf.flush()
         iteration += 1
+        if args.elo_games:
+            run_elo_matches(args, generations, training_agent, iteration,
+                            total_games, logf)
+
+        logf.flush()
         if args.max_iterations and iteration >= args.max_iterations:
             break
     logf.close()
