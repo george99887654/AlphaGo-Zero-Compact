@@ -55,3 +55,8 @@ Convert them once so they run on TF 2.10 (outputs are identical):
 ```
 python convert_legacy_zero_agent.py bots/zeroagent_v2.hdf5 bots/zeroagent_v2_tf2.hdf5
 ```
+
+## Code map
+Open `schematics/rlgo_code_map.html` in a browser for diagrams of the training loop,
+the batched search, the library layers and the deployment paths, plus a function
+reference.

@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RLGo Code Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: one reading column; each section = short lead + one figure; reference tables at the end.
+   Palette: cool slate ink on pale stone (Go stones), one teal accent for "the hop that matters". */
+:root {
+  --bg: #f4f5f6;
+  --surface: #ffffff;
+  --ink: #15191e;
+  --muted: #5b636d;
+  --line: #d5d9de;
+  --accent: #0f6f80;
+  --accent-soft: #dcecef;
+  --warn: #9a5b00;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161a; --surface: #1a2026; --ink: #e8ecef; --muted: #9aa4ae;
+    --line: #2f3841; --accent: #4fb6c8; --accent-soft: #163239; --warn: #e0a54a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161a; --surface: #1a2026; --ink: #e8ecef; --muted: #9aa4ae;
+  --line: #2f3841; --accent: #4fb6c8; --accent-soft: #163239; --warn: #e0a54a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 15px/1.6 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+}
+main { max-width: 900px; margin: 0 auto; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font: 500 12px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+h1 { font: 600 34px/1.1 var(--font-display); margin: 0; text-wrap: balance; }
+h2 { font: 600 22px/1.2 var(--font-display); margin: 0; text-wrap: balance; }
+h3 { font: 600 15px/1.3 var(--font-body); margin: 0; }
+p { margin: 0; max-width: 68ch; }
+.lead { color: var(--muted); font-size: 16px; }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; }
+figure .scroll { overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 620px; height: auto; color: var(--ink); }
+figcaption { color: var(--muted); font-size: 13.5px; max-width: 75ch; }
+/* SVG classes (styled from the page so both themes work) */
+.box { fill: var(--surface); stroke: currentColor; stroke-width: 1.2; }
+.box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+.file { fill: var(--bg); stroke: var(--muted); stroke-width: 1; stroke-dasharray: 0; }
+.t { fill: currentColor; font: 600 13px var(--font-body); }
+.s { fill: var(--muted); font: 400 11.5px var(--font-mono); }
+.e { fill: var(--muted); font: italic 400 11.5px var(--font-body); }
+.ta { fill: var(--accent); font: 600 13px var(--font-body); }
+.edge { stroke: currentColor; stroke-width: 1.3; fill: none; }
+.edge-dash { stroke: var(--muted); stroke-width: 1.2; fill: none; stroke-dasharray: 4 3; }
+.edge-accent { stroke: var(--accent); stroke-width: 1.8; fill: none; }
+.node { fill: var(--surface); stroke: currentColor; stroke-width: 1.1; }
+.node-leaf { fill: var(--accent); stroke: var(--accent); }
+.arrowhead { fill: currentColor; }
+.arrowhead-accent { fill: var(--accent); }
+.arrowhead-muted { fill: var(--muted); }
+/* Layer stack */
+.layers { display: grid; gap: 8px; }
+.layer { display: grid; grid-template-columns: 150px 1fr; gap: 12px; align-items: start; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.layer > div:first-child { font: 600 13px var(--font-body); }
+.layer > div:first-child span { display: block; font: 400 12px var(--font-body); color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.chip { font: 400 12.5px var(--font-mono); padding: 3px 8px; border-radius: 5px; border: 1px solid var(--line); background: var(--bg); }
+.chip.key { border-color: var(--accent); background: var(--accent-soft); }
+.chip.legacy { color: var(--muted); border-style: dashed; }
+.down { text-align: center; color: var(--muted); font: 400 12px var(--font-mono); }
+/* Tables */
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 640px; }
+th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+th { font: 600 12px var(--font-body); color: var(--muted); letter-spacing: .03em; text-transform: uppercase; background: var(--bg); }
+tr.group td { font: 600 13px var(--font-display); background: var(--accent-soft); color: var(--ink); }
+td:first-child { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
+td.calls { color: var(--muted); font-size: 12.5px; }
+.issues { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.issues li { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 6px; padding: 10px 14px; }
+.issues li b { color: var(--warn); font-weight: 600; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 12.5px; }
+.legend i { display: inline-block; width: 22px; height: 0; border-top: 1.5px solid var(--ink); vertical-align: middle; margin-right: 6px; }
+.legend i.d { border-top: 1.5px dashed var(--muted); }
+.legend i.a { border-top: 2px solid var(--accent); }
+@media (max-width: 560px) {
+  h1 { font-size: 27px; }
+  .layer { grid-template-columns: 1fr; }
+}
+body { margin: 0; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<main>
+  <header>
+    <div class="eyebrow">AlphaGo-Zero-Compact · develop · v1.0.4</div>
+    <h1>RLGo Code Map</h1>
+    <p class="lead">How the scripts and functions in this repository fit together: the training loop that improves the bot, the batched search inside every move, the library layers underneath, and the ways a trained bot is served to a person or another program.</p>
+  </header>
+
+  <section>
+    <h2>One training iteration</h2>
+    <p>Everything starts from <code>play_train_eval_zero.py main()</code>. It runs the four stages below in a loop. Each stage starts fresh worker processes, and the stages talk to each other only through files in the work directory.</p>
+    <figure>
+      <div class="scroll">
+      <svg viewBox="0 0 760 545" role="img" aria-label="Training iteration: self-play writes experience, training overwrites the learner, gating promotes it to reference at 55 percent wins, Elo matches snapshot a generation and refit ratings, then the loop repeats.">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+          <marker id="ahm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-muted"/></marker>
+          <marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-accent"/></marker>
+        </defs>
+        <!-- column headers -->
+        <text x="60" y="20" class="s">STAGES (processes)</text>
+        <text x="470" y="12" class="s">WORK DIRECTORY (files)</text>
+
+        <!-- F0 init -->
+        <rect x="470" y="20" width="270" height="44" rx="6" class="file"/>
+        <text x="484" y="38" class="t">init.hdf5</text>
+        <text x="484" y="55" class="s">init_zero_agent_v2.py · random net</text>
+        <path d="M470,46 L362,98" class="edge-dash" marker-end="url(#ahm)"/>
+        <text x="370" y="62" class="e">copied to learner</text>
+        <text x="370" y="76" class="e">and reference</text>
+
+        <!-- S1 self-play (accent: where the time goes) -->
+        <rect x="40" y="80" width="320" height="76" rx="8" class="box-accent"/>
+        <text x="56" y="102" class="ta">1  Self-play</text>
+        <text x="56" y="122" class="s">generate_experience → 7 workers</text>
+        <text x="56" y="138" class="s">do_self_play → play_games_batched</text>
+        <text x="56" y="152" class="e">learner vs reference · 256 games</text>
+
+        <!-- S2 train -->
+        <rect x="40" y="190" width="320" height="70" rx="8" class="box"/>
+        <text x="56" y="212" class="t">2  Train</text>
+        <text x="56" y="232" class="s">train_on_experience → train_worker</text>
+        <text x="56" y="248" class="s">ZeroAgent.train · 1 epoch, Adam</text>
+
+        <!-- S3 gate -->
+        <rect x="40" y="300" width="320" height="70" rx="8" class="box"/>
+        <text x="56" y="322" class="t">3  Gate</text>
+        <text x="56" y="342" class="s">evaluate → eval_worker</text>
+        <text x="56" y="358" class="e">learner vs reference · ≥ 55% promotes</text>
+
+        <!-- S4 elo -->
+        <rect x="40" y="410" width="320" height="70" rx="8" class="box"/>
+        <text x="56" y="432" class="t">4  Elo</text>
+        <text x="56" y="452" class="s">run_elo_matches → evaluate × 2</text>
+        <text x="56" y="468" class="e">gen N vs gen 0 and gen N−1</text>
+
+        <!-- stage-to-stage arrows -->
+        <line x1="200" y1="156" x2="200" y2="188" class="edge" marker-end="url(#ah)"/>
+        <line x1="200" y1="260" x2="200" y2="298" class="edge" marker-end="url(#ah)"/>
+        <line x1="200" y1="370" x2="200" y2="408" class="edge" marker-end="url(#ah)"/>
+        <!-- loop back -->
+        <path d="M40,445 L18,445 L18,118 L38,118" class="edge" marker-end="url(#ah)"/>
+        <text x="12" y="300" class="e" transform="rotate(-90 12 300)" text-anchor="middle">next iteration</text>
+
+        <!-- files -->
+        <rect x="470" y="145" width="270" height="50" rx="6" class="file"/>
+        <text x="484" y="166" class="t">zero_exp_temp.hdf5</text>
+        <text x="484" y="184" class="s">states ×8 symmetries, visits, rewards</text>
+
+        <rect x="470" y="255" width="270" height="50" rx="6" class="file"/>
+        <text x="484" y="276" class="t">zero_agent_train.hdf5</text>
+        <text x="484" y="294" class="s">the learner (weights + encoder)</text>
+
+        <rect x="470" y="325" width="270" height="50" rx="6" class="file"/>
+        <text x="484" y="346" class="t">zero_agent_v2_&lt;games&gt;.hdf5</text>
+        <text x="484" y="364" class="s">current reference opponent</text>
+
+        <rect x="470" y="405" width="270" height="50" rx="6" class="file"/>
+        <text x="484" y="426" class="t">gen_NNNN.hdf5</text>
+        <text x="484" y="444" class="s">one snapshot per iteration</text>
+
+        <rect x="470" y="475" width="270" height="56" rx="6" class="file"/>
+        <text x="484" y="496" class="t">elo_matches.csv · elo.csv</text>
+        <text x="484" y="514" class="s">elo_report.html (chart)</text>
+
+        <!-- stage ↔ file edges -->
+        <path d="M360,112 L468,162" class="edge-accent" marker-end="url(#aha)"/>
+        <text x="392" y="126" class="ta" style="font-weight:500;font-size:11.5px">writes</text>
+        <path d="M470,182 L362,218" class="edge" marker-end="url(#ah)"/>
+        <text x="398" y="214" class="e">trains on</text>
+        <path d="M360,244 L468,272" class="edge" marker-end="url(#ah)"/>
+        <text x="380" y="250" class="e">overwrites</text>
+        <path d="M470,296 L362,326" class="edge-dash" marker-end="url(#ahm)"/>
+        <text x="384" y="322" class="e">loads</text>
+        <path d="M360,350 L468,350" class="edge" marker-end="url(#ah)"/>
+        <text x="372" y="344" class="e">copy if ≥ 55%</text>
+        <path d="M360,436 L468,430" class="edge" marker-end="url(#ah)"/>
+        <text x="380" y="426" class="e">snapshot</text>
+        <path d="M360,462 L468,500" class="edge" marker-end="url(#ah)"/>
+        <text x="372" y="492" class="e">append, refit</text>
+      </svg>
+      </div>
+      <div class="legend"><span><i></i>writes / reads</span><span><i class="d"></i>loads a model</span><span><i class="a"></i>the expensive stage</span></div>
+      <figcaption>Each stage runs in its own processes because TensorFlow must not start in the parent before the workers spawn. Self-play and evaluation workers take batches of games from a shared counter (<code>claim_games</code>), so the faster GPU worker simply plays more of them. Gating decides which agent self-play is played against; Elo matches only measure, they never change training.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Inside one move: a batched search round</h2>
+    <p><code>ZeroAgent.select_moves</code> searches every game a worker is playing at the same time. The trees stay separate, but each round's new leaf positions from all of them go to the network in one call. That shared call is the only step that runs on the GPU.</p>
+    <figure>
+      <div class="scroll">
+      <svg viewBox="0 0 760 330" role="img" aria-label="Batched MCTS round: each game's tree is walked down to a leaf by select_branch, all leaves are encoded and stacked, one network call returns priors and values, and each tree expands its leaf and backs the value up. Repeated 100 times per move.">
+        <defs>
+          <marker id="bh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+          <marker id="bha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead-accent"/></marker>
+        </defs>
+        <text x="20" y="18" class="s">ONE TREE PER GAME</text>
+        <!-- three trees -->
+        <g>
+          <rect x="20" y="28" width="190" height="72" rx="8" class="box"/>
+          <text x="32" y="46" class="t">Game 1</text>
+          <circle cx="150" cy="44" r="6" class="node"/>
+          <circle cx="128" cy="68" r="5" class="node"/><circle cx="172" cy="68" r="5" class="node"/>
+          <circle cx="160" cy="90" r="5" class="node-leaf"/>
+          <line x1="146" y1="49" x2="131" y2="63" class="edge"/><line x1="154" y1="49" x2="169" y2="63" class="edge"/><line x1="170" y1="73" x2="162" y2="85" class="edge"/>
+          <text x="32" y="88" class="s">walk → leaf</text>
+        </g>
+        <g>
+          <rect x="20" y="118" width="190" height="72" rx="8" class="box"/>
+          <text x="32" y="136" class="t">Game 2</text>
+          <circle cx="150" cy="134" r="6" class="node"/>
+          <circle cx="128" cy="158" r="5" class="node"/><circle cx="172" cy="158" r="5" class="node"/>
+          <circle cx="118" cy="180" r="5" class="node-leaf"/>
+          <line x1="146" y1="139" x2="131" y2="153" class="edge"/><line x1="154" y1="139" x2="169" y2="153" class="edge"/><line x1="125" y1="163" x2="120" y2="175" class="edge"/>
+          <text x="32" y="178" class="s">walk → leaf</text>
+        </g>
+        <text x="115" y="206" class="s" text-anchor="middle">⋮</text>
+        <g>
+          <rect x="20" y="214" width="190" height="72" rx="8" class="box"/>
+          <text x="32" y="232" class="t">Game N</text>
+          <circle cx="150" cy="230" r="6" class="node"/>
+          <circle cx="128" cy="254" r="5" class="node"/><circle cx="172" cy="254" r="5" class="node-leaf"/>
+          <line x1="146" y1="235" x2="131" y2="249" class="edge"/><line x1="154" y1="235" x2="169" y2="249" class="edge"/>
+          <text x="32" y="274" class="s">walk → leaf</text>
+        </g>
+        <!-- leaves to create_nodes -->
+        <path d="M210,64 L298,140" class="edge" marker-end="url(#bh)"/>
+        <path d="M210,154 L298,158" class="edge" marker-end="url(#bh)"/>
+        <path d="M210,250 L298,178" class="edge" marker-end="url(#bh)"/>
+        <text x="226" y="110" class="e">leaf positions</text>
+
+        <rect x="300" y="118" width="190" height="84" rx="8" class="box"/>
+        <text x="314" y="140" class="t">create_nodes</text>
+        <text x="314" y="160" class="s">encoder.encode</text>
+        <text x="314" y="176" class="s">random symmetry (1 of 8)</text>
+        <text x="314" y="192" class="s">stack → N×11×9×9</text>
+
+        <path d="M490,160 L558,160" class="edge-accent" marker-end="url(#bha)"/>
+        <text x="524" y="150" class="ta" text-anchor="middle" style="font-weight:500;font-size:11.5px">1 call</text>
+
+        <rect x="560" y="112" width="180" height="96" rx="8" class="box-accent"/>
+        <text x="574" y="134" class="ta">infer() on GPU</text>
+        <text x="574" y="154" class="s">tf.function(model)</text>
+        <text x="574" y="170" class="s">→ priors N×82</text>
+        <text x="574" y="186" class="s">→ values N×1</text>
+        <text x="574" y="201" class="e">undo symmetry on priors</text>
+
+        <!-- return path -->
+        <path d="M650,208 L650,306 L115,306 L115,290" class="edge" marker-end="url(#bh)"/>
+        <text x="382" y="300" class="e" text-anchor="middle">ZeroTreeNode per leaf (legal moves, pass only if forced), then back_up: +v, −v, +v … to the root</text>
+
+        <!-- loop label -->
+        <path d="M300,40 L740,40" class="edge" style="stroke-dasharray:2 3"/>
+        <text x="520" y="32" class="s" text-anchor="middle">repeat num_rounds = 100 times, then finish_search per game</text>
+      </svg>
+      </div>
+      <figcaption><code>select_branch</code> picks the child with the highest <span class="mono">Q + c·P·√N / (n+1)</span> as one NumPy argmax over the node's arrays. When a walk reaches a finished game, the real score from <code>scoring.compute_game_result</code> is backed up instead of the network's guess. After the last round, <code>finish_search</code> records the root's visit counts (×8 symmetries) for training and samples the move at the current temperature: 1.0 for the first 16 moves of self-play, 0.05 after that and in evaluation.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Library layers</h2>
+    <p>Each layer only calls the layers below it. Teal chips are on the Zero training path. Dashed chips are earlier code from the <em>Deep Learning and the Game of Go</em> book that this pipeline doesn't use.</p>
+    <div class="layers" role="list">
+      <div class="layer" role="listitem"><div>Entry scripts<span>run from DLGo/</span></div>
+        <div class="chips"><span class="chip key">play_train_eval_zero.py</span><span class="chip key">init_zero_agent_v2.py</span><span class="chip">convert_legacy_zero_agent.py</span><span class="chip">web_demo.py</span><span class="chip">run_gtp.py</span><span class="chip legacy">eval_zero.py</span></div></div>
+      <div class="down">uses ↓</div>
+      <div class="layer" role="listitem"><div>Agents &amp; services<span>decide moves, serve them</span></div>
+        <div class="chips"><span class="chip key">zero.agent · ZeroAgent, ZeroTreeNode</span><span class="chip key">zero.experience</span><span class="chip key">elo</span><span class="chip">httpfrontend.server</span><span class="chip">gtp.frontend · play_local</span><span class="chip">agent.termination</span><span class="chip legacy">agent.pg · predict · alphago · naive</span></div></div>
+      <div class="down">uses ↓</div>
+      <div class="layer" role="listitem"><div>Model &amp; encoding<span>tensors in, policy/value out</span></div>
+        <div class="chips"><span class="chip key">networks.alphago_zero</span><span class="chip key">encoders.zero</span><span class="chip key">kerasutil</span><span class="chip key">cuda_paths</span><span class="chip legacy">networks.small · medium · large · alphago</span><span class="chip legacy">encoders.oneplane · sevenplane · simple · betago</span></div></div>
+      <div class="down">uses ↓</div>
+      <div class="layer" role="listitem"><div>Go rules<span>pure Python, the hot path</span></div>
+        <div class="chips"><span class="chip key">goboard_fast · Board, GameState, Move</span><span class="chip key">gotypes</span><span class="chip key">zobrist</span><span class="chip key">scoring</span><span class="chip key">agent.helpers_fast</span><span class="chip">utils</span><span class="chip legacy">goboard · goboard_slow</span><span class="chip">gosgf</span></div></div>
+      <div class="down">uses ↓</div>
+      <div class="layer" role="listitem"><div>External<span>.venv</span></div>
+        <div class="chips"><span class="chip">TensorFlow 2.10 (tf.keras)</span><span class="chip">CUDA 11.8 / cuDNN 8.9 wheels</span><span class="chip">NumPy</span><span class="chip">h5py</span><span class="chip">Flask</span><span class="chip">Node + gtp2ogs.js</span></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Deployment and visualization</h2>
+    <p>A trained <code>.hdf5</code> agent reaches the outside world in three ways: a browser board through Flask, any GTP program through standard input and output, and a static Elo chart from the training run.</p>
+    <figure>
+      <div class="scroll">
+      <svg viewBox="0 0 760 330" role="img" aria-label="Deployment paths: a browser page posts the move list to Flask, which replays it and asks ZeroAgent for a move; a GTP engine reads commands on stdin, bridged to online-go.com by gtp2ogs or to GNU Go by LocalGtpBot; the training loop writes elo_report.html.">
+        <defs>
+          <marker id="dh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+        </defs>
+        <!-- Row A: web -->
+        <text x="20" y="18" class="s">WEB DEMO</text>
+        <rect x="20" y="28" width="190" height="70" rx="8" class="box"/>
+        <text x="34" y="50" class="t">Browser</text>
+        <text x="34" y="68" class="s">static/play_zero_99.html</text>
+        <text x="34" y="84" class="e">jgoboard, 9×9</text>
+
+        <path d="M210,52 L298,52" class="edge" marker-end="url(#dh)"/>
+        <text x="254" y="44" class="s" text-anchor="middle">POST /select-move/zero</text>
+        <path d="M298,76 L212,76" class="edge" marker-end="url(#dh)"/>
+        <text x="254" y="92" class="s" text-anchor="middle">{bot_move}</text>
+
+        <rect x="300" y="28" width="210" height="70" rx="8" class="box"/>
+        <text x="314" y="50" class="t">Flask app</text>
+        <text x="314" y="68" class="s">web_demo.py → get_web_app</text>
+        <text x="314" y="84" class="e">replays moves[] into GameState</text>
+
+        <path d="M510,63 L568,63" class="edge" marker-end="url(#dh)"/>
+        <rect x="570" y="28" width="170" height="70" rx="8" class="box-accent"/>
+        <text x="584" y="50" class="ta">ZeroAgent</text>
+        <text x="584" y="68" class="s">.select_move(state)</text>
+        <text x="584" y="84" class="e">load_zero_agent(.hdf5)</text>
+
+        <!-- Row B: GTP -->
+        <text x="20" y="132" class="s">GTP ENGINE</text>
+        <rect x="20" y="142" width="150" height="62" rx="8" class="box"/>
+        <text x="34" y="164" class="t">online-go.com</text>
+        <text x="34" y="182" class="e">live opponents</text>
+        <path d="M170,173 L218,173" class="edge" marker-end="url(#dh)" marker-start="url(#dh)"/>
+        <text x="194" y="165" class="s" text-anchor="middle">socket.io</text>
+
+        <rect x="220" y="142" width="140" height="62" rx="8" class="box"/>
+        <text x="234" y="164" class="t">gtp2ogs.js</text>
+        <text x="234" y="182" class="e">Node bridge</text>
+        <path d="M360,173 L418,173" class="edge" marker-end="url(#dh)" marker-start="url(#dh)"/>
+        <text x="389" y="165" class="s" text-anchor="middle">stdin/out</text>
+
+        <rect x="420" y="142" width="160" height="62" rx="8" class="box"/>
+        <text x="434" y="164" class="t">run_gtp.py</text>
+        <text x="434" y="182" class="s">GTPFrontend.run</text>
+        <text x="434" y="197" class="e">genmove, play, boardsize…</text>
+        <path d="M580,173 L628,173" class="edge" marker-end="url(#dh)"/>
+        <rect x="630" y="142" width="110" height="62" rx="8" class="box"/>
+        <text x="644" y="164" class="t">Termination</text>
+        <text x="644" y="182" class="s">Agent(agent)</text>
+        <text x="644" y="197" class="e">pass / resign</text>
+
+        <rect x="220" y="222" width="140" height="44" rx="8" class="box"/>
+        <text x="234" y="241" class="t">LocalGtpBot</text>
+        <text x="234" y="257" class="e">gtp/play_local</text>
+        <path d="M290,222 L290,206" class="edge" marker-end="url(#dh)"/>
+        <text x="372" y="244" class="e">plays our agent vs GNU Go or Pachi, writes out.sgf</text>
+
+        <!-- Row C: elo report -->
+        <text x="20" y="296" class="s">TRAINING CHART</text>
+        <rect x="140" y="282" width="250" height="36" rx="6" class="file"/>
+        <text x="154" y="305" class="s">work/…/elo_report.html</text>
+        <text x="404" y="305" class="e">rewritten after every iteration by dlgo.elo.write_html_report; open it in any browser</text>
+      </svg>
+      </div>
+      <figcaption>The web server holds no game state. Each request sends the whole move list, the server replays it into a fresh <code>GameState</code>, and the agent answers with one move. GTP is the standard text protocol Go programs use to talk to each other, so the same engine can play on online-go.com through <code>gtp2ogs.js</code> or locally against GNU Go.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Function reference</h2>
+    <p>The functions that carry the system, grouped by file, with what each one does and what calls it.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Function</th><th>What it does</th><th>Called by</th></tr></thead>
+        <tbody>
+          <tr class="group"><td colspan="3">play_train_eval_zero.py: the training loop</td></tr>
+          <tr><td>main</td><td>Parses options, copies the starting agent to the learner, then loops self-play → train → gate → Elo.</td><td class="calls">command line</td></tr>
+          <tr><td>generate_experience</td><td>Starts the self-play workers, waits for them, merges their experience files into <code>zero_exp_temp.hdf5</code>.</td><td class="calls">main</td></tr>
+          <tr><td>do_self_play</td><td>Worker process: loads both agents, claims batches of games, completes each game's episodes with ±1 rewards, saves experience.</td><td class="calls">generate_experience</td></tr>
+          <tr><td>play_games_batched</td><td>Plays N games at once; at every step each agent searches all games where it is to move with one <code>select_moves</code> call.</td><td class="calls">do_self_play, eval_worker</td></tr>
+          <tr><td>configure_worker</td><td>GPU worker: memory growth. CPU worker: hides the GPU and uses one TF thread.</td><td class="calls">workers</td></tr>
+          <tr><td>claim_games</td><td>Takes the next batch of game numbers from a shared counter (load balancing).</td><td class="calls">workers</td></tr>
+          <tr><td>train_on_experience / train_worker</td><td>Trains the learner on the latest experience in a separate process and saves it.</td><td class="calls">main</td></tr>
+          <tr><td>evaluate / eval_worker</td><td>Plays agent 1 vs agent 2 at low temperature, alternating colours; returns agent 1's wins.</td><td class="calls">main, run_elo_matches</td></tr>
+          <tr><td>run_elo_matches</td><td>Saves <code>gen_NNNN.hdf5</code>, plays it against gen 0 and the previous generation, refits ratings, rewrites the report.</td><td class="calls">main (with --elo-games)</td></tr>
+
+          <tr class="group"><td colspan="3">dlgo/zero/agent.py: search and learning</td></tr>
+          <tr><td>ZeroAgent.select_moves</td><td>Batched MCTS for several positions; returns one move each.</td><td class="calls">play_games_batched, select_move</td></tr>
+          <tr><td>ZeroAgent.select_move</td><td>Single-position search, used by the web demo and GTP.</td><td class="calls">httpfrontend, gtp</td></tr>
+          <tr><td>create_nodes / infer</td><td>Encodes positions under a random symmetry, runs the network once for the whole batch, builds tree nodes.</td><td class="calls">select_moves</td></tr>
+          <tr><td>select_branch</td><td>Vectorized PUCT choice of the next child.</td><td class="calls">select_moves</td></tr>
+          <tr><td>ZeroTreeNode</td><td>One search position: its legal moves (no filling our own eyes; passing only when nothing else is legal), priors, visit counts and values as arrays.</td><td class="calls">create_nodes</td></tr>
+          <tr><td>back_up / terminal_value</td><td>Propagates a value to the root with alternating sign; scores finished games for real.</td><td class="calls">select_moves</td></tr>
+          <tr><td>finish_search</td><td>Records visit counts ×8 symmetries into the collector, samples the move at the current temperature.</td><td class="calls">select_moves</td></tr>
+          <tr><td>train</td><td>Turns visit counts into per-row policy targets, compiles with Adam, fits policy (cross-entropy) and value (MSE).</td><td class="calls">train_worker</td></tr>
+          <tr><td>load_zero_agent / serialize</td><td>Reads or writes the agent file: encoder name, board size, Keras model.</td><td class="calls">everywhere</td></tr>
+
+          <tr class="group"><td colspan="3">Model, data and ratings</td></tr>
+          <tr><td>networks.dual_residual_network</td><td>Builds the 8-block residual tower with policy (82 moves) and value heads; channels-last inside.</td><td class="calls">init_zero_agent_v2</td></tr>
+          <tr><td>encoders.zero.ZeroEncoder.encode</td><td>11 planes: own/opponent stones by liberties (1–4+), komi side, ko-forbidden points.</td><td class="calls">create_nodes, finish_search</td></tr>
+          <tr><td>ZeroExperienceCollector</td><td>Buffers one agent's decisions for a game, then stamps the final reward on all of them.</td><td class="calls">play_games_batched</td></tr>
+          <tr><td>elo.fit_ratings</td><td>Bradley-Terry ratings on the Elo scale from all matches, gen 0 fixed at 0.</td><td class="calls">run_elo_matches</td></tr>
+          <tr><td>kerasutil.save_/load_model_to_hdf5_group</td><td>Embeds a Keras HDF5 model inside the agent file.</td><td class="calls">ZeroAgent</td></tr>
+          <tr><td>cuda_paths.add_nvidia_dll_dirs</td><td>Puts the pip CUDA libraries on the DLL path when <code>dlgo</code> is imported.</td><td class="calls">dlgo/__init__</td></tr>
+
+          <tr class="group"><td colspan="3">Go rules (goboard_fast.py, scoring.py)</td></tr>
+          <tr><td>GameState.apply_move</td><td>Returns the next immutable state; copies the board and records the Zobrist hash for ko.</td><td class="calls">search, games, servers</td></tr>
+          <tr><td>GameState.is_valid_move</td><td>Empty point, not suicide, not a ko repeat. The most-called function in self-play.</td><td class="calls">ZeroTreeNode, finish_search</td></tr>
+          <tr><td>scoring.compute_game_result</td><td>Area scoring with komi 1.5; decides winners and terminal values.</td><td class="calls">games, search</td></tr>
+
+          <tr class="group"><td colspan="3">Other scripts</td></tr>
+          <tr><td>init_zero_agent_v2.py</td><td>Creates a fresh random agent file (9×9 by default).</td><td class="calls">you, once per run</td></tr>
+          <tr><td>convert_legacy_zero_agent.py</td><td>Rebuilds a TF 2.2-era agent in the current layout with identical outputs.</td><td class="calls">you, for old bots</td></tr>
+          <tr><td>web_demo.py</td><td>Loads an agent and serves the browser board on port 5000.</td><td class="calls">you</td></tr>
+          <tr><td>run_gtp.py</td><td>Runs a GTP engine on standard input and output.</td><td class="calls">gtp2ogs.js, GUIs</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Known gaps</h2>
+    <ul class="issues">
+      <li><b>web_demo.py</b> loads <code>bots/zeroagent_v1.hdf5</code>, which isn't in the repository. Point it at a real agent, such as <code>bots/zeroagent_v2_tf2.hdf5</code> or a <code>gen_NNNN.hdf5</code> from a run.</li>
+      <li><b>run_gtp.py</b> serves a policy-network bot from the book (<code>agents/betago.hdf5</code>, also missing), not the Zero agent, and its first line still names Python 2.</li>
+      <li><b>eval_zero.py</b> is an older copy of the training script that still plays one game at a time.</li>
+      <li><b>Training data</b>: each round trains only on the newest batch of self-play games. There's no replay window of recent games.</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>
