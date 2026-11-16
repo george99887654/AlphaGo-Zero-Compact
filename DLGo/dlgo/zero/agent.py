@@ -120,10 +120,17 @@ class ZeroTreeNode:
 class ZeroAgent(Agent):
 # end::zero_defn[]
     def __init__(self, model, encoder, rounds_per_move=1000, c=2.0,
-                 pass_only_when_forced=True):
+                 pass_only_when_forced=True, resign_threshold=None,
+                 resign_min_moves=30):
         self.model = model
         self.encoder = encoder
         self.pass_only_when_forced = pass_only_when_forced
+        # Resign when the searched win probability of the chosen move falls
+        # below resign_threshold (None = never; self-play must not resign,
+        # since every game has to be played out for training).
+        self.resign_threshold = resign_threshold
+        self.resign_min_moves = resign_min_moves
+        self.last_search = {}
 
         self.collector = None
         self.temperature = 1.0
@@ -238,6 +245,38 @@ class ZeroAgent(Agent):
 
 # end::zero_record_collector[]
 
+        move = self.sample_move(root, visit_counts)
+
+        # Search estimate for the chosen move, from our point of view: the
+        # mean backed-up value of that branch (or of the root if unvisited).
+        slot = root.slot(move)
+        if slot is not None and root.visits[slot] > 0:
+            value = root.total_values[slot] / root.visits[slot]
+        else:
+            value = root.total_values.sum() / max(1, root.visits.sum())
+        value = float(np.clip(value, -1.0, 1.0))
+        win_prob = (value + 1.0) / 2.0
+        self.last_search = {
+            'player': game_state.next_player.name,
+            'value': round(value, 4),
+            'win_prob': round(win_prob, 4),
+            'network_value': round(float(root.value), 4),
+            'visits': int(root.visits.sum()),
+        }
+        if (self.resign_threshold is not None
+                and win_prob < self.resign_threshold
+                and move_number(game_state) >= self.resign_min_moves):
+            self.last_search['resigned'] = True
+            return goboard_fast.Move.resign()
+        return move
+
+    def diagnostics(self):
+        """Details of the last search (shown by the web demo)."""
+        return dict(self.last_search)
+
+    def sample_move(self, root, visit_counts):
+        """Pick the move to play from the root's visit counts, sharpened by
+        the current temperature."""
 # HHY
         move_probs = visit_counts / self.num_rounds
         # Prevent move probs from getting stuck at 0 or 1.
@@ -392,6 +431,15 @@ class ZeroAgent(Agent):
         h5file.create_group('model')
         kerasutil.save_model_to_hdf5_group(self.model, h5file['model'])
 # end::serialize[] HHY
+
+def move_number(game_state):
+    """Number of moves played to reach game_state."""
+    n = 0
+    while game_state.previous_state is not None:
+        n += 1
+        game_state = game_state.previous_state
+    return n
+
 
 def load_zero_agent(h5file):
     model = kerasutil.load_model_from_hdf5_group(h5file['model'])

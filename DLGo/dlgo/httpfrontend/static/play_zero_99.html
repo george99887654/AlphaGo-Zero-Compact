@@ -23,7 +23,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Board</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RLGo · Play Go</title>
   <style>
   body {
     font-family: Helvetica Neue, Helvetica, Arial, sans-serif;
@@ -82,20 +83,76 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
           box-shadow: 0 2.5em 0 0;
       }
   }
+  /* --- RLGo play page --- */
+  :root {
+    --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1f22; --muted: #6b6f76;
+    --line: #d9d6cf; --black-stone: #1d1f22; --white-stone: #f7f6f2;
+    --accent: #0f6f80;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15181b; --panel: #1e2226; --ink: #e9ebed; --muted: #9aa1a8;
+            --line: #343a40; --black-stone: #0b0c0d; --white-stone: #eceae4;
+            --accent: #4fb6c8; color-scheme: dark; }
+  }
+  body { background: var(--bg); color: var(--ink); margin: 0; padding: 20px 16px 40px; }
+  .wrap { max-width: 600px; margin: 0 auto; display: grid; gap: 14px; justify-items: center; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  #board { max-width: 100%; overflow-x: auto; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  button {
+    font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { opacity: .45; cursor: default; }
+  button svg { width: 16px; height: 16px; }
+  .panel { width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+           padding: 12px 14px; display: grid; gap: 8px; text-align: left; }
+  .wr-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+  .wr-bar { display: flex; height: 26px; border-radius: 5px; overflow: hidden; border: 1px solid var(--line); }
+  .wr-b, .wr-w { display: flex; align-items: center; font-size: 13px; font-weight: 600;
+                 font-variant-numeric: tabular-nums; transition: width .35s ease; white-space: nowrap; }
+  .wr-b { background: var(--black-stone); color: #f2f2f2; justify-content: flex-start; padding-left: 8px; }
+  .wr-w { background: var(--white-stone); color: #1d1f22; justify-content: flex-end; padding-right: 8px; }
+  .wr-note { font-size: 12px; color: var(--muted); }
+  #status { font-size: 15px; min-height: 22px; }
+  #status.over { font-weight: 600; color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .wr-b, .wr-w { transition: none; } }
   </style>
 </head>
 <body>
-
-<div>Engine: Alphazero (9x9)</div>
-<div><a href="#" onclick="resetGame(event);">new game</a></div>
-<div id="board"></div>
-<div>
+<div class="wrap">
+  <div>
+    <h1>Play Go against RLGo</h1>
+    <div class="sub" id="botinfo">9×9 · you play Black</div>
+  </div>
+  <div id="board"></div>
+  <div class="controls">
+    <button id="undo" type="button" title="Take back your last move and the bot's reply" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+      Undo
+    </button>
+    <button id="pass" type="button" title="Pass your turn">Pass</button>
+    <button id="newgame" type="button">New game</button>
+  </div>
+  <div>
     <div id="status">Black to play</div>
     <div id="spinner" style="display: none" class="loader"></div>
+  </div>
+  <div class="panel" aria-live="polite">
+    <div class="wr-head"><span>You (Black)</span><span>Estimated win chance</span><span>Bot (White)</span></div>
+    <div class="wr-bar" role="img" id="wrbar" aria-label="No estimate yet">
+      <div class="wr-b" id="wr-b" style="width:50%">–</div>
+      <div class="wr-w" id="wr-w" style="width:50%">–</div>
+    </div>
+    <div class="wr-note" id="wr-note">Appears after the bot's first move. It comes from the bot's own search, so it is the bot's opinion, not an exact count.</div>
+  </div>
 </div>
+
 <script src="iframeSizer.contentWindow.min.js"></script>
-
-
 <script type="text/javascript" src="./jgoboard-latest.js"></script>
 <script type="text/javascript" src="large/board.js"></script>
 <script type="text/javascript">
@@ -103,28 +160,21 @@ var BOARD_SIZE = 9;
 var jrecord = new JGO.Record(BOARD_SIZE);
 var jboard = jrecord.jboard;
 var jsetup = new JGO.Setup(jboard, JGO.BOARD.largeWalnut);
-var player = JGO.BLACK; // next player
+var player = JGO.BLACK; // the human always plays Black
 var ko = false, lastMove = false; // ko coordinate and last move coordinate
 var lastHover = false, lastX = -1, lastY = -1; // hover helper vars
-var record = [];
+var record = [];        // moves so far: 'E5', 'pass' or 'resign'; even index = human
+var estimates = [];     // estimates[n] = bot's win estimate after record had n moves
 var colnames = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N'];
 var waitingForBot = false;
-
-function resetGame(ev) {
-    jrecord.jboard.clear();
-    jrecord.root = jrecord.current = null;
-    jrecord.info = {};
-    record = [];
-    waitingForBot = false;
-    ev.preventDefault();
-}
+var gameOver = false;
+var requestId = 0;      // ignore replies to requests made before an undo/new game
 
 function coordsToString(point) {
     var row = (BOARD_SIZE - 1) - point.j;
     var col = point.i;
     return colnames[col] + ((row + 1).toString());
 }
-
 function stringToCoords(move_string) {
     var colStr = move_string.substring(0, 1);
     var rowStr = move_string.substring(1);
@@ -132,117 +182,226 @@ function stringToCoords(move_string) {
     var row = BOARD_SIZE - parseInt(rowStr, 10);
     return new JGO.Coordinate(col, row);
 }
-
-function applyMove(player, coord) {
-    var play = jboard.playMove(coord, player, ko);
-
-    if (play.success) {
-        record.push(coordsToString(coord));
-        node = jrecord.createNode(true);
-        node.info.captures[player] += play.captures.length; // tally captures
-        node.setType(coord, player); // play stone
-        node.setType(play.captures, JGO.CLEAR); // clear opponent's stones
-
-        if (lastMove) {
-            node.setMark(lastMove, JGO.MARK.NONE); // clear previous mark
-        }
-        if (ko) {
-            node.setMark(ko, JGO.MARK.NONE); // clear previous ko mark
-        }
-        node.setMark(coord, JGO.MARK.CIRCLE); // mark move
-        lastMove = coord;
-
-      if(play.ko)
-        node.setMark(play.ko, JGO.MARK.CIRCLE); // mark ko, too
-      ko = play.ko;
-    } else alert('Illegal move: ' + play.errorMsg);
+function clearBoard() {
+    jrecord.jboard.clear();
+    jrecord.root = jrecord.current = null;
+    jrecord.info = {};
+    ko = false;
+    lastMove = false;
+    lastHover = false;
+    record = [];
 }
+// Place a stone; returns true if it was legal. `quiet` suppresses the
+// message (used when replaying moves after an undo). A status message is
+// used instead of alert(), which would block the page until dismissed.
+function applyMove(color, coord, quiet) {
+    var play = jboard.playMove(coord, color, ko);
+    if (!play.success) {
+        if (!quiet) setStatus('Illegal move: ' + String(play.errorMsg).replace(/[.!]+$/, '') + '. Try another point');
+        return false;
+    }
+    record.push(coordsToString(coord));
+    var node = jrecord.createNode(true);
+    node.info.captures[color] += play.captures.length; // tally captures
+    node.setType(coord, color); // play stone
+    node.setType(play.captures, JGO.CLEAR); // clear opponent's stones
+    if (lastMove) node.setMark(lastMove, JGO.MARK.NONE); // clear previous mark
+    if (ko) node.setMark(ko, JGO.MARK.NONE); // clear previous ko mark
+    node.setMark(coord, JGO.MARK.CIRCLE); // mark move
+    lastMove = coord;
+    if (play.ko) node.setMark(play.ko, JGO.MARK.CIRCLE); // mark ko, too
+    ko = play.ko;
+    return true;
+}
+function applyPass() {
+    record.push('pass');
+    if (lastMove) jboard.setMark(lastMove, JGO.MARK.NONE);
+    lastMove = false;
+    ko = false;
+}
+function colorAt(index) { return index % 2 === 0 ? JGO.BLACK : JGO.WHITE; }
 
+function setStatus(text, over) {
+    var el = document.getElementById('status');
+    el.textContent = text;
+    el.className = over ? 'over' : '';
+}
+function showEstimate(est) {
+    var b = document.getElementById('wr-b'), w = document.getElementById('wr-w');
+    var bar = document.getElementById('wrbar'), note = document.getElementById('wr-note');
+    if (!est) {
+        b.style.width = w.style.width = '50%';
+        b.textContent = w.textContent = '–';
+        bar.setAttribute('aria-label', 'No estimate yet');
+        note.textContent = "Appears after the bot's first move. It comes from the bot's own search, so it is the bot's opinion, not an exact count.";
+        return;
+    }
+    var bot = Math.max(0, Math.min(1, est.win_prob));
+    var human = 1 - bot;
+    var hp = Math.round(human * 100), bp = 100 - hp;
+    // keep both labels readable even at extremes
+    b.style.width = Math.max(12, Math.min(88, hp)) + '%';
+    w.style.width = (100 - Math.max(12, Math.min(88, hp))) + '%';
+    b.textContent = hp + '%';
+    w.textContent = bp + '%';
+    bar.setAttribute('aria-label', 'You ' + hp + ' percent, bot ' + bp + ' percent');
+    note.textContent = 'After move ' + est.move + ', from ' + est.visits +
+        ' search visits. The network alone says ' + Math.round(50 * (1 + est.network_value)) + '% for the bot.';
+}
+function updateButtons() {
+    document.getElementById('undo').disabled = waitingForBot || record.length === 0;
+    document.getElementById('pass').disabled = waitingForBot || gameOver;
+}
 function waitForBot() {
-    console.log('Waiting for bot...');
     document.getElementById('status').style.display = 'none';
     document.getElementById('spinner').style.display = 'block';
     waitingForBot = true;
+    updateButtons();
 }
-
-function stopWaiting(botmove) {
-    var text = 'Bot plays ' + botmove;
-    if (botmove == 'pass') {
-        text = 'Bot passes';
-    } else if (botmove == 'resign') {
-        text = 'Bot resigns';
-    }
-    document.getElementById('status').innerHTML = text;
+function stopWaiting() {
     document.getElementById('status').style.display = 'block';
     document.getElementById('spinner').style.display = 'none';
     waitingForBot = false;
+    updateButtons();
 }
+function lastTwoPasses() {
+    var n = record.length;
+    return n >= 2 && record[n - 1] === 'pass' && record[n - 2] === 'pass';
+}
+
+function askBot() {
+    if (lastTwoPasses()) {
+        gameOver = true;
+        setStatus('Both players passed: game over', true);
+        updateButtons();
+        return;
+    }
+    waitForBot();
+    var myRequest = ++requestId;
+    fetch('/select-move/zero', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({'board_size': BOARD_SIZE, 'moves': record}),
+    }).then(function(response) {
+        if (!response.ok) throw new Error('server answered ' + response.status);
+        return response.json();
+    }).then(function(data) {
+        if (myRequest !== requestId) return; // undone or new game meanwhile
+        var mv = data.bot_move;
+        var d = data.diagnostics || {};
+        if (mv === 'resign') {
+            record.push('resign');
+            gameOver = true;
+            setStatus('Bot resigns: you win!', true);
+        } else if (mv === 'pass') {
+            applyPass();
+            setStatus(lastTwoPasses() ? 'Both players passed: game over' : 'Bot passes. Your move', lastTwoPasses());
+            if (lastTwoPasses()) gameOver = true;
+        } else {
+            applyMove(JGO.WHITE, stringToCoords(mv), true);
+            setStatus('Bot plays ' + mv + '. Your move');
+        }
+        if (d.win_prob !== undefined) {
+            estimates[record.length] = {win_prob: d.win_prob, visits: d.visits,
+                                        network_value: d.network_value, move: record.length};
+            showEstimate(estimates[record.length]);
+        }
+        stopWaiting();
+    }).catch(function(error) {
+        if (myRequest !== requestId) return;
+        console.log(error);
+        setStatus('Could not reach the bot (' + error.message + '). Is web_demo.py running?');
+        stopWaiting();
+    });
+}
+
+function humanPlays(coord) {
+    if (waitingForBot || gameOver) return;
+    if (!applyMove(JGO.BLACK, coord, false)) return; // illegal: stay on our turn
+    askBot();
+}
+function humanPasses() {
+    if (waitingForBot || gameOver) return;
+    applyPass();
+    askBot();
+}
+// Rebuild the board from a list of moves.
+function replay(moves) {
+    clearBoard();
+    for (var k = 0; k < moves.length; k++) {
+        if (moves[k] === 'pass') applyPass();
+        else if (moves[k] === 'resign') record.push('resign');
+        else applyMove(colorAt(k), stringToCoords(moves[k]), true);
+    }
+}
+function undo() {
+    if (waitingForBot || record.length === 0) return;
+    requestId++;
+    // Take back to just before the human's last move (human moves are at
+    // even indices), i.e. remove the bot's reply and the human move.
+    var keep = record.length % 2 === 0 ? record.length - 2 : record.length - 1;
+    keep = Math.max(0, keep);
+    var moves = record.slice(0, keep);
+    replay(moves);
+    estimates.length = keep + 1;
+    var last = null;
+    for (var n = keep; n >= 0; n--) { if (estimates[n]) { last = estimates[n]; break; } }
+    showEstimate(last);
+    gameOver = false;
+    setStatus(keep === 0 ? 'Black to play' : 'Took back a move. Your move');
+    updateButtons();
+}
+function newGame() {
+    requestId++;
+    clearBoard();
+    estimates = [];
+    gameOver = false;
+    waitingForBot = false;
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('status').style.display = 'block';
+    setStatus('Black to play');
+    showEstimate(null);
+    updateButtons();
+}
+
+document.getElementById('undo').addEventListener('click', undo);
+document.getElementById('pass').addEventListener('click', humanPasses);
+document.getElementById('newgame').addEventListener('click', newGame);
+fetch('/bot-info').then(function(r) { return r.ok ? r.json() : null; }).then(function(info) {
+    if (!info) return;
+    var resign = info.resign_threshold ? ('resigns below ' + Math.round(100 * info.resign_threshold) + '%') : 'never resigns';
+    document.getElementById('botinfo').textContent =
+        '9×9 · you play Black · bot ' + info.agent.replace('.hdf5', '') + ', ' + info.rounds + ' search rounds, ' + resign;
+}).catch(function() {});
+updateButtons();
 
 jsetup.setOptions({stars: {points:5}});
 jsetup.create('board', function(canvas) {
   canvas.addListener('click', function(coord, ev) {
-    if (waitingForBot) {
-        return;
-    }
-    var opponent = (player == JGO.BLACK) ? JGO.WHITE : JGO.BLACK;
-
-    if(ev.shiftKey) { // on shift do edit
-      if(jboard.getMark(coord) == JGO.MARK.NONE)
+    if (waitingForBot || gameOver) return;
+    if (ev.shiftKey) { // on shift do edit
+      if (jboard.getMark(coord) == JGO.MARK.NONE)
         jboard.setMark(coord, JGO.MARK.SELECTED);
       else
         jboard.setMark(coord, JGO.MARK.NONE);
-
       return;
     }
-
     // clear hover away - it'll be replaced or then it will be an illegal move
-    // in any case so no need to worry about putting it back afterwards
-    if(lastHover)
+    if (lastHover)
       jboard.setType(new JGO.Coordinate(lastX, lastY), JGO.CLEAR);
-
     lastHover = false;
-
-    console.log('Human', coordsToString(coord));
-    applyMove(JGO.BLACK, coord);
-
-    waitForBot();
-    fetch('/select-move/zero', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({'board_size': BOARD_SIZE, 'moves': record}),
-    }).then(function(response) {
-        if (!waitingForBot) {
-            console.log('Got response but not waiting for one');
-            return;
-        }
-        response.json().then(function(data) {
-            if (data.bot_move == 'pass' || data.bot_move == 'resign') {
-                record.push(data.bot_move);
-            } else {
-                var botCoord = stringToCoords(data.bot_move);
-                applyMove(JGO.WHITE, botCoord);
-            }
-            stopWaiting(data.bot_move);
-        });
-    }).catch(function(error) {
-        console.log(error);
-        stopWaiting(data.bot_move);
-    });
+    humanPlays(coord);
   });
 
   canvas.addListener('mousemove', function(coord, ev) {
-    if(coord.i == -1 || coord.j == -1 || (coord.i == lastX && coord.j == lastY))
+    if (coord.i == -1 || coord.j == -1 || (coord.i == lastX && coord.j == lastY))
       return;
-
-    if(lastHover) // clear previous hover if there was one
+    if (lastHover) // clear previous hover if there was one
       jboard.setType(new JGO.Coordinate(lastX, lastY), JGO.CLEAR);
-
     lastX = coord.i;
     lastY = coord.j;
-
-    if(jboard.getType(coord) == JGO.CLEAR && jboard.getMark(coord) == JGO.MARK.NONE) {
+    if (!waitingForBot && !gameOver &&
+        jboard.getType(coord) == JGO.CLEAR && jboard.getMark(coord) == JGO.MARK.NONE) {
       jboard.setType(coord, player == JGO.WHITE ? JGO.DIM_WHITE : JGO.DIM_BLACK);
       lastHover = true;
     } else
@@ -250,13 +409,11 @@ jsetup.create('board', function(canvas) {
   });
 
   canvas.addListener('mouseout', function(ev) {
-    if(lastHover)
+    if (lastHover)
       jboard.setType(new JGO.Coordinate(lastX, lastY), JGO.CLEAR);
-
     lastHover = false;
   });
 });
 </script>
-
 </body>
 </html>

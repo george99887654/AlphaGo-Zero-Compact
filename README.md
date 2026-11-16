@@ -67,3 +67,7 @@ python web_demo.py            # serves the highest-rated generation of the lates
 ```
 Open http://127.0.0.1:5000/ and click the board to play Black. Options:
 `--agent <file.hdf5>`, `--rounds 400` (stronger, slower), `--gpu`, `--port`.
+In the browser: **Undo** takes back your last move and the bot's reply, **Pass**
+passes, and the bar shows each side's estimated win chance from the bot's search.
+The bot resigns when its estimated win chance drops below 5% after move 30
+(`--resign-threshold`, `--resign-min-moves`; `--resign-threshold 0` never resigns).

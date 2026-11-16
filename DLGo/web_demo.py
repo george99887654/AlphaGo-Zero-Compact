@@ -11,7 +11,7 @@ import glob
 import os
 
 import h5py
-from flask import redirect
+from flask import jsonify, redirect
 
 from dlgo import httpfrontend
 from dlgo import zero
@@ -45,6 +45,11 @@ def main():
     parser.add_argument('--temperature', type=float, default=0.05,
                         help='move sampling temperature (low = play the most '
                              'visited move)')
+    parser.add_argument('--resign-threshold', type=float, default=0.05,
+                        help='resign when the searched win probability of its '
+                             'best move is below this (0 = never resign)')
+    parser.add_argument('--resign-min-moves', type=int, default=30,
+                        help='never resign before this many moves')
     parser.add_argument('--gpu', action='store_true',
                         help='use the GPU (default CPU, so a training run on '
                              'the GPU is not slowed down)')
@@ -64,11 +69,21 @@ def main():
         bot = zero.load_zero_agent(f)
     bot.num_rounds = args.rounds
     bot.set_temperature(args.temperature)
-    print('Serving %s (%d rounds/move, temperature %.2f) on http://%s:%d/'
+    bot.resign_threshold = args.resign_threshold or None
+    bot.resign_min_moves = args.resign_min_moves
+    print('Serving %s (%d rounds/move, temperature %.2f, resign below %s) '
+          'on http://%s:%d/'
           % (agent_file, args.rounds, args.temperature,
+             '%.0f%%' % (100 * args.resign_threshold) if args.resign_threshold else 'never',
              args.bind_address, args.port))
 
     web_app = httpfrontend.get_web_app({'zero': bot})
+
+    @web_app.route('/bot-info')
+    def bot_info():
+        return jsonify({'agent': os.path.basename(agent_file),
+                        'rounds': args.rounds,
+                        'resign_threshold': args.resign_threshold})
 
     @web_app.route('/')
     def index():
