@@ -60,3 +60,10 @@ python convert_legacy_zero_agent.py bots/zeroagent_v2.hdf5 bots/zeroagent_v2_tf2
 Open `schematics/rlgo_code_map.html` in a browser for diagrams of the training loop,
 the batched search, the library layers and the deployment paths, plus a function
 reference.
+
+## Play against the bot
+```
+python web_demo.py            # serves the highest-rated generation of the latest run
+```
+Open http://127.0.0.1:5000/ and click the board to play Black. Options:
+`--agent <file.hdf5>`, `--rounds 400` (stronger, slower), `--gpu`, `--port`.

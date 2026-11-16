@@ -110,7 +110,7 @@ body { margin: 0; }
 
 <main>
   <header>
-    <div class="eyebrow">AlphaGo-Zero-Compact · develop · v1.0.4</div>
+    <div class="eyebrow">AlphaGo-Zero-Compact · develop · v1.0.6</div>
     <h1>RLGo Code Map</h1>
     <p class="lead">How the scripts and functions in this repository fit together: the training loop that improves the bot, the batched search inside every move, the library layers underneath, and the ways a trained bot is served to a person or another program.</p>
   </header>
@@ -427,7 +427,7 @@ body { margin: 0; }
           <tr class="group"><td colspan="3">Other scripts</td></tr>
           <tr><td>init_zero_agent_v2.py</td><td>Creates a fresh random agent file (9×9 by default).</td><td class="calls">you, once per run</td></tr>
           <tr><td>convert_legacy_zero_agent.py</td><td>Rebuilds a TF 2.2-era agent in the current layout with identical outputs.</td><td class="calls">you, for old bots</td></tr>
-          <tr><td>web_demo.py</td><td>Loads an agent and serves the browser board on port 5000.</td><td class="calls">you</td></tr>
+          <tr><td>web_demo.py</td><td>Loads the highest-rated generation of the latest run (or <code>--agent</code>), plays at temperature 0.05 with 200 rounds on the CPU, and serves the board at http://127.0.0.1:5000/.</td><td class="calls">you</td></tr>
           <tr><td>run_gtp.py</td><td>Runs a GTP engine on standard input and output.</td><td class="calls">gtp2ogs.js, GUIs</td></tr>
         </tbody>
       </table>
@@ -437,7 +437,7 @@ body { margin: 0; }
   <section>
     <h2>Known gaps</h2>
     <ul class="issues">
-      <li><b>web_demo.py</b> loads <code>bots/zeroagent_v1.hdf5</code>, which isn't in the repository. Point it at a real agent, such as <code>bots/zeroagent_v2_tf2.hdf5</code> or a <code>gen_NNNN.hdf5</code> from a run.</li>
+      <li><b>Web board</b>: you can't pass or see a score in the browser, and you always play Black. The bot plays until the board is full.</li>
       <li><b>run_gtp.py</b> serves a policy-network bot from the book (<code>agents/betago.hdf5</code>, also missing), not the Zero agent, and its first line still names Python 2.</li>
       <li><b>eval_zero.py</b> is an older copy of the training script that still plays one game at a time.</li>
       <li><b>Training data</b>: each round trains only on the newest batch of self-play games. There's no replay window of recent games.</li>
