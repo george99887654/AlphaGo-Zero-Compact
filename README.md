@@ -77,3 +77,10 @@ Run with `--report-dir ../schematics` and the training loop copies its Elo
 chart to `schematics/rlgo_elo_report.html` (and the ratings to
 `schematics/rlgo_elo.csv`) after every iteration. Gating matches against the
 reference are counted in the ratings along with the Elo matches.
+
+## Run in the background on Windows
+Double-click `DLGo\start_training.bat` to resume the training run in its own
+window, and `DLGo\start_demo.bat` to play the best bot in the browser. Close a
+window to stop it; starting it again continues where it left off. Start them
+yourself rather than from Claude Code: processes started from a Claude Code
+session are stopped when its turn ends.
