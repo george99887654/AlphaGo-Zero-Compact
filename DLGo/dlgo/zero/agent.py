@@ -17,6 +17,77 @@ __all__ = [
     'load_zero_agent',
 ]
 
+def legal_non_eye_moves(state, all_moves):
+    """Indices of all_moves that are legal in `state` and do not fill one of
+    the mover's own eyes.
+
+    Same result as
+        [i for i, m in enumerate(all_moves)
+         if state.is_valid_move(m)
+         and not is_point_an_eye(state.board, m.point, state.next_player)]
+    but checks "game over" once and calls the board directly, since this
+    runs for every new search node.
+    """
+    if state.is_over():
+        return []
+    board = state.board
+    grid = board._grid
+    neighbor_table = board.neighbor_table
+    corner_table = board.corner_table
+    player = state.next_player
+    legal = []
+    for idx, move in enumerate(all_moves):
+        if not move.is_play:
+            legal.append(idx)          # pass (resign is never in all_moves)
+            continue
+        point = move.point
+        if grid.get(point) is not None:
+            continue
+        # One scan of the neighbours answers the three questions that
+        # Board.is_self_capture, Board.will_capture and is_point_an_eye
+        # each answer with their own scan.
+        has_empty = False          # an empty neighbour = a liberty
+        captures = False           # an enemy neighbour string in atari
+        friends_in_atari = True    # every friendly neighbour string has 1 liberty
+        all_friendly = True        # every neighbour is our stone (eye shape)
+        for neighbor in neighbor_table[point]:
+            string = grid.get(neighbor)
+            if string is None:
+                has_empty = True
+                all_friendly = False
+            elif string.color == player:
+                if len(string.liberties) != 1:
+                    friends_in_atari = False
+            else:
+                all_friendly = False
+                if len(string.liberties) == 1:
+                    captures = True
+        # Self-capture: no liberty, no capture, and every friendly string
+        # we would join is in atari (Board.is_self_capture).
+        if not has_empty and not captures and friends_in_atari:
+            continue
+        # Ko is only possible when the move captures.
+        if captures and state.does_move_violate_ko(player, move):
+            continue
+        # Own eye (helpers_fast.is_point_an_eye): all neighbours friendly and
+        # enough friendly diagonal corners.
+        if all_friendly:
+            corners = corner_table[point]
+            friendly_corners = sum(
+                1 for corner in corners
+                if (grid.get(corner) is not None
+                    and grid.get(corner).color == player))
+            off_board = 4 - len(corners)
+            if off_board > 0:
+                is_eye = off_board + friendly_corners == 4
+            else:
+                is_eye = friendly_corners >= 3
+            if is_eye:
+                continue
+        legal.append(idx)
+    return legal
+
+
 # tag::node_class_defn[]
 class ZeroTreeNode:
 # end::node_class_defn[]
@@ -43,10 +114,7 @@ class ZeroTreeNode:
         self.parent = parent                      # <1>
         self.last_slot = last_slot                # <1>
         self.total_visit_count = 1
-        legal = [
-            idx for idx, move in enumerate(all_moves)
-            if state.is_valid_move(move)
-            and not is_point_an_eye(state.board, move.point, state.next_player)]
+        legal = legal_non_eye_moves(state, all_moves)
         if pass_only_when_forced:
             plays = [idx for idx in legal if not all_moves[idx].is_pass]
             if plays:

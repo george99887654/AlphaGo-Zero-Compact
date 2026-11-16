@@ -25,22 +25,43 @@ class ZeroEncoder(Encoder):
             board_tensor[8] = 1
         else:
             board_tensor[9] = 1
-        for r in range(self.board_size):
-            for c in range(self.board_size):
-                p = Point(row=r + 1, col=c + 1)
-                go_string = game_state.board.get_go_string(p)
+        board = game_state.board
+        grid = board._grid
+        neighbor_table = board.neighbor_table
+        for r, c, p in self._points():
+            go_string = grid.get(p)
 
-                if go_string is None:
-                    if game_state.does_move_violate_ko(next_player,
-                                                       Move.play(p)):
-                        board_tensor[10][r][c] = 1
-                else:
-                    liberty_plane = min(4, go_string.num_liberties) - 1
-                    if go_string.color != next_player:
-                        liberty_plane += 4
-                    board_tensor[liberty_plane][r][c] = 1
+            if go_string is None:
+                # A ko violation requires a capture (an enemy neighbour
+                # string in atari, as in Board.will_capture), so only build a
+                # Move and run the full ko check where one is possible.
+                captures = False
+                for neighbor in neighbor_table[p]:
+                    s = grid.get(neighbor)
+                    if s is not None and s.color != next_player and \
+                            len(s.liberties) == 1:
+                        captures = True
+                        break
+                if captures and game_state.does_move_violate_ko(
+                        next_player, Move.play(p)):
+                    board_tensor[10][r][c] = 1
+            else:
+                liberty_plane = min(4, go_string.num_liberties) - 1
+                if go_string.color != next_player:
+                    liberty_plane += 4
+                board_tensor[liberty_plane][r][c] = 1
 
         return board_tensor
+
+    def _points(self):
+        """(row index, col index, Point) for every board point, built once."""
+        points = getattr(self, '_point_list', None)
+        if points is None:
+            points = [(r, c, Point(row=r + 1, col=c + 1))
+                      for r in range(self.board_size)
+                      for c in range(self.board_size)]
+            self._point_list = points
+        return points
 
 # tag::encode_move[]
     def encode_move(self, move):

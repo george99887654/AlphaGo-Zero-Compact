@@ -106,7 +106,16 @@ class Board():
             init_corner_table(dim)
         self.neighbor_table = neighbor_tables[dim]
         self.corner_table = corner_tables[dim]
-        self.move_ages = MoveAge(self)
+        self._move_ages = None
+
+    @property
+    def move_ages(self):
+        """Per-point stone ages (book chapter 13 feature). Created only when
+        first used; nothing in the Zero pipeline reads it, so the hot path
+        no longer pays for a NumPy update on every move."""
+        if self._move_ages is None:
+            self._move_ages = MoveAge(self)
+        return self._move_ages
 
 
     def neighbors(self, point):
@@ -124,8 +133,9 @@ class Board():
         adjacent_same_color = []
         adjacent_opposite_color = []
         liberties = []
-        self.move_ages.increment_all()
-        self.move_ages.add(point)
+        if self._move_ages is not None:
+            self._move_ages.increment_all()
+            self._move_ages.add(point)
         for neighbor in self.neighbor_table[point]:
             neighbor_string = self._grid.get(neighbor)
             if neighbor_string is None:
@@ -166,7 +176,8 @@ class Board():
 
     def _remove_string(self, string):
         for point in string.stones:
-            self.move_ages.reset_age(point)
+            if self._move_ages is not None:
+                self._move_ages.reset_age(point)
             # Removing a string can create liberties for other strings.
             for neighbor in self.neighbor_table[point]:
                 neighbor_string = self._grid.get(neighbor)
@@ -242,10 +253,16 @@ class Board():
             self._hash() == other._hash()
 
     def __deepcopy__(self, memodict={}):
-        copied = Board(self.num_rows, self.num_cols)
-        # Can do a shallow copy b/c the dictionary maps tuples
-        # (immutable) to GoStrings (also immutable)
-        copied._grid = copy.copy(self._grid)
+        # Same result as building a new Board and copying the grid, without
+        # re-running __init__. A shallow grid copy is enough because the
+        # dictionary maps Points (immutable) to GoStrings (also immutable).
+        copied = Board.__new__(Board)
+        copied.num_rows = self.num_rows
+        copied.num_cols = self.num_cols
+        copied.neighbor_table = self.neighbor_table
+        copied.corner_table = self.corner_table
+        copied._move_ages = None
+        copied._grid = self._grid.copy()
         copied._hash = self._hash
         return copied
 
@@ -310,14 +327,24 @@ class GameState():
         self.board = board
         self.next_player = next_player
         self.previous_state = previous
-
-        if previous is None:
-            self.previous_states = frozenset()
-        else:
-            self.previous_states = frozenset(
-                previous.previous_states |
-                {(previous.next_player, previous.board.zobrist_hash())})
+        self._previous_states = None
         self.last_move = move
+
+    @property
+    def previous_states(self):
+        """Set of (player to move, board hash) for every earlier position,
+        used for the ko check. Built on first use and cached: most positions
+        created during search never need it, and building it eagerly cost
+        a copy of the whole history for every new position."""
+        if self._previous_states is None:
+            if self.previous_state is None:
+                self._previous_states = frozenset()
+            else:
+                prev = self.previous_state
+                self._previous_states = frozenset(
+                    prev.previous_states |
+                    {(prev.next_player, prev.board.zobrist_hash())})
+        return self._previous_states
 
     def apply_move(self, move):
         """Return the new GameState after applying the move."""
