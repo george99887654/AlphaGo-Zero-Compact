@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import filecmp
 import glob
 import multiprocessing
 import os
@@ -448,14 +449,38 @@ def save_generation(work_dir, agent_file, iteration):
     return name
 
 
+def generation_of(agent_file, work_dir, generations):
+    """Name of the generation snapshot whose file is identical to agent_file
+    (promoted references are byte-for-byte copies of a snapshot), or None."""
+    if not agent_file or not os.path.exists(agent_file):
+        return None
+    for gen in reversed(generations):
+        path = os.path.join(work_dir, gen + '.hdf5')
+        if os.path.exists(path) and filecmp.cmp(agent_file, path, shallow=False):
+            return gen
+    return None
+
+
 def run_elo_matches(args, generations, training_agent, iteration,
-                    total_games, logf):
+                    total_games, logf, gating=None):
     """Snapshot the learner as a new generation, play it against
-    generation 0 and the most recent generations, and refresh the ratings."""
+    generation 0 and the most recent generations, and refresh the ratings.
+
+    gating = (reference_file, wins, losses) from this iteration's gating
+    match; it is added to the match history when the reference is a known
+    generation, since it is a match between the same weights."""
     name = save_generation(args.work_dir, training_agent, iteration)
     opponents = [generations[0]] + generations[-args.elo_opponents:]
     opponents = list(dict.fromkeys(opponents))      # dedupe, keep order
     matches_file = os.path.join(args.work_dir, 'elo_matches.csv')
+    if gating is not None:
+        ref_file, g_wins, g_losses = gating
+        ref_gen = generation_of(ref_file, args.work_dir, generations)
+        if ref_gen is not None:
+            elo.append_match(matches_file, iteration, total_games,
+                             name, ref_gen, g_wins, g_losses)
+            logf.write('Gating match %s vs %s counted for Elo: %d-%d\n' % (
+                name, ref_gen, g_wins, g_losses))
     for opp in opponents:
         wins = evaluate(
             os.path.join(args.work_dir, name + '.hdf5'),
@@ -475,8 +500,13 @@ def run_elo_matches(args, generations, training_agent, iteration,
     ratings = elo.fit_ratings(matches, anchor=generations[0])
     rows = elo.write_ratings(os.path.join(args.work_dir, 'elo.csv'),
                              ratings, matches)
-    elo.write_html_report(os.path.join(args.work_dir, 'elo_report.html'),
-                          rows, matches)
+    report = os.path.join(args.work_dir, 'elo_report.html')
+    elo.write_html_report(report, rows, matches)
+    if args.report_dir:
+        os.makedirs(args.report_dir, exist_ok=True)
+        shutil.copy(report, os.path.join(args.report_dir, 'rlgo_elo_report.html'))
+        shutil.copy(os.path.join(args.work_dir, 'elo.csv'),
+                    os.path.join(args.report_dir, 'rlgo_elo.csv'))
     print('Elo of %s: %.0f (gen 0 = 0)' % (name, ratings[name]))
     logf.write('Elo of %s after %d games: %.0f\n' % (
         name, total_games, ratings[name]))
@@ -546,6 +576,10 @@ def main():
                              '--elo-opponents generations and update '
                              'elo.csv / elo_report.html (0 = off)')
     parser.add_argument('--elo-opponents', type=int, default=2)
+    parser.add_argument('--report-dir',
+                        help='also copy elo_report.html (as '
+                             'rlgo_elo_report.html) and elo.csv here after '
+                             'every iteration, e.g. ../schematics')
     parser.add_argument('--gpu-workers', type=int, default=1,
                         help='how many of the --num-workers use the GPU; the '
                              'rest run single-threaded on the CPU')
@@ -619,6 +653,7 @@ def main():
         logf.write('Won %d / %d games (%.3f)\n' % (
             wins, num_eval, float(wins) / num_eval))
 
+        gating = (reference_agent, wins, num_eval - wins)
         if wins >= 0.55 * num_eval:
             next_filename = os.path.join(
                 args.work_dir,
@@ -632,7 +667,7 @@ def main():
         iteration += 1
         if args.elo_games:
             run_elo_matches(args, generations, training_agent, iteration,
-                            total_games, logf)
+                            total_games, logf, gating=gating)
 
         logf.flush()
         if args.max_iterations and iteration - start_iteration >= args.max_iterations:

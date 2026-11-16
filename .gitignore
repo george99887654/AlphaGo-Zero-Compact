@@ -148,3 +148,7 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# Auto-updated by training (--report-dir schematics)
+schematics/rlgo_elo_report.html
+schematics/rlgo_elo.csv

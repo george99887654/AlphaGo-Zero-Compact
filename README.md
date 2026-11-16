@@ -71,3 +71,9 @@ In the browser: **Undo** takes back your last move and the bot's reply, **Pass**
 passes, and the bar shows each side's estimated win chance from the bot's search.
 The bot resigns when its estimated win chance drops below 5% after move 30
 (`--resign-threshold`, `--resign-min-moves`; `--resign-threshold 0` never resigns).
+
+## Training progress
+Run with `--report-dir ../schematics` and the training loop copies its Elo
+chart to `schematics/rlgo_elo_report.html` (and the ratings to
+`schematics/rlgo_elo.csv`) after every iteration. Gating matches against the
+reference are counted in the ratings along with the Elo matches.
