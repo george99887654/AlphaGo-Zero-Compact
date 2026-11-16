@@ -160,9 +160,13 @@ def play_games_batched(agent1, agent2, num_games, board_size,
     active = list(range(num_games))
     while active:
         temperature = temperature_fn(num_moves)
+        # Decide who is to move in each game *before* anyone moves, so every
+        # game advances exactly one ply per step (num_moves = ply count).
+        agent1_to_move = {i: games[i].next_player == agent1_colors[i]
+                          for i in active}
         for agent_idx, agent in enumerate((agent1, agent2)):
             idx = [i for i in active
-                   if (games[i].next_player == agent1_colors[i]) == (agent_idx == 0)]
+                   if agent1_to_move[i] == (agent_idx == 0)]
             if not idx:
                 continue
             agent.set_temperature(temperature)

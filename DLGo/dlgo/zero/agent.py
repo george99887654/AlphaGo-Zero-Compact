@@ -28,10 +28,16 @@ class ZeroTreeNode:
     Children are keyed by slot as well.
     """
 # tag::node_class_body[]
-    def __init__(self, state, value, priors, parent, last_slot, all_moves):
+    def __init__(self, state, value, priors, parent, last_slot, all_moves,
+                 pass_only_when_forced=True):
         """`priors` is the prior vector over all encoder moves (board points +
         pass) and `all_moves[i]` the Move for encoder index i. `last_slot` is
-        the slot in `parent` of the move that led here (None for a root)."""
+        the slot in `parent` of the move that led here (None for a root).
+
+        With pass_only_when_forced, passing is a branch only when no other
+        legal move (that does not fill one of our own eyes) exists. Games are
+        then played out to the end, which costs nothing under area scoring
+        and keeps self-play from learning to "win" by passing early."""
         self.state = state
         self.value = value
         self.parent = parent                      # <1>
@@ -41,6 +47,10 @@ class ZeroTreeNode:
             idx for idx, move in enumerate(all_moves)
             if state.is_valid_move(move)
             and not is_point_an_eye(state.board, move.point, state.next_player)]
+        if pass_only_when_forced:
+            plays = [idx for idx in legal if not all_moves[idx].is_pass]
+            if plays:
+                legal = plays
         self.move_indices = np.array(legal, dtype=np.int64)  # encoder index per slot
         self.branch_moves = [all_moves[idx] for idx in legal]
         self.priors = np.asarray(priors, dtype=np.float64)[self.move_indices]
@@ -109,9 +119,11 @@ class ZeroTreeNode:
 # tag::zero_defn[]
 class ZeroAgent(Agent):
 # end::zero_defn[]
-    def __init__(self, model, encoder, rounds_per_move=1000, c=2.0):
+    def __init__(self, model, encoder, rounds_per_move=1000, c=2.0,
+                 pass_only_when_forced=True):
         self.model = model
         self.encoder = encoder
+        self.pass_only_when_forced = pass_only_when_forced
 
         self.collector = None
         self.temperature = 1.0
@@ -241,10 +253,12 @@ class ZeroAgent(Agent):
         candidates = np.arange(self.encoder.num_moves())
         ranked_moves = np.random.choice(
             candidates, self.encoder.num_moves(), replace=False, p=move_probs)
+        # Only moves that were search branches are allowed (this excludes
+        # illegal moves, filling our own eyes and, unless forced, passing).
+        branch_indices = set(root.move_indices.tolist())
         for move_index in ranked_moves:
-            move = self.all_moves[move_index]
-            if game_state.is_valid_move(move):
-                return move
+            if move_index in branch_indices:
+                return self.all_moves[move_index]
 # HHY
 
 
@@ -318,7 +332,8 @@ class ZeroAgent(Agent):
             value = all_values[k][0]                           # <2>
             new_node = ZeroTreeNode(
                 game_states[k], value, priors,
-                parents[k], slots[k], self.all_moves)
+                parents[k], slots[k], self.all_moves,
+                self.pass_only_when_forced)
             if parents[k] is not None:
                 parents[k].add_child(slots[k], new_node)
             nodes.append(new_node)
