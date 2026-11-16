@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import glob
 import multiprocessing
 import os
 import random
@@ -481,10 +482,49 @@ def run_elo_matches(args, generations, training_agent, iteration,
         name, total_games, ratings[name]))
 
 
+def load_run_state(work_dir, log_file, fallback_reference=None):
+    """Reconstruct where a run in work_dir stopped, for --resume.
+
+    The learner is work_dir/zero_agent_train.hdf5 as last written. The
+    reference is the last "New reference is ..." in the log (falling back to
+    the run's starting reference). Completed iterations are the gen_NNNN
+    snapshots, and the game count comes from the Elo match history.
+    """
+    learner = os.path.join(work_dir, 'zero_agent_train.hdf5')
+    if not os.path.exists(learner):
+        raise SystemExit('Cannot resume: %s not found' % learner)
+    reference = None
+    first_reference = None
+    if os.path.exists(log_file):
+        with open(log_file) as f:
+            for line in f:
+                if line.startswith('New reference is '):
+                    reference = line[len('New reference is '):].strip()
+                elif line.startswith('Referencing from ') and first_reference is None:
+                    first_reference = line[len('Referencing from '):].rsplit(' at ', 1)[0]
+    reference = reference or fallback_reference or first_reference
+    if not reference or not os.path.exists(reference):
+        raise SystemExit('Cannot resume: reference agent %r not found '
+                         '(pass --ragent)' % reference)
+    gens = sorted(os.path.basename(g)[:-len('.hdf5')]
+                  for g in glob.glob(os.path.join(work_dir, 'gen_*.hdf5')))
+    iteration = int(gens[-1][len('gen_'):]) if gens else 0
+    total_games = 0
+    for m in elo.load_matches(os.path.join(work_dir, 'elo_matches.csv')):
+        if m['iteration'] == iteration:
+            total_games = m['total_games']
+    return dict(reference=reference, generations=gens,
+                iteration=iteration, total_games=total_games)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--lagent', required=True)
-    parser.add_argument('--ragent', required=True)
+    parser.add_argument('--lagent', help='starting learner (not needed with --resume)')
+    parser.add_argument('--ragent', help='starting reference (not needed with --resume)')
+    parser.add_argument('--resume', action='store_true',
+                        help='continue the run in --work-dir: keep its learner, '
+                             'latest promoted reference, generations and Elo '
+                             'history (an interrupted iteration is restarted)')
     parser.add_argument('--games-per-batch', '-g', type=int, default=1000)
     parser.add_argument('--work-dir', '-d', required=True)
     parser.add_argument('--num-workers', '-w', type=int, default=1)
@@ -511,28 +551,42 @@ def main():
                              'rest run single-threaded on the CPU')
 
     args = parser.parse_args()
+    if not args.resume and not (args.lagent and args.ragent):
+        parser.error('--lagent and --ragent are required unless --resume')
     os.makedirs(args.work_dir, exist_ok=True)
 
     logf = open(args.log_file, 'a')
     logf.write('----------------------\n')
-    logf.write('Starting from %s at %s\n' % (
-        args.lagent, datetime.datetime.now()))
-    logf.write('Referencing from %s at %s\n' % (
-        args.ragent, datetime.datetime.now()))
-
-    reference_agent = args.ragent
     experience_file = os.path.join(args.work_dir, 'zero_exp_temp.hdf5')
     tmp_agent = os.path.join(args.work_dir, 'zero_agent_temp.hdf5')
     # training_agent is the single, continuously-updated learner: it plays
     # the self-play games, every training round starts from its latest
     # weights and writes back to it, and it is the agent that is evaluated.
     training_agent = os.path.join(args.work_dir, 'zero_agent_train.hdf5')
-    total_games = 0
-    iteration = 0
-    shutil.copy(args.lagent, training_agent)
-    generations = []      # snapshot names, in order, for Elo matches
-    if args.elo_games:
-        generations.append(save_generation(args.work_dir, training_agent, 0))
+    if args.resume:
+        state = load_run_state(args.work_dir, args.log_file, args.ragent)
+        reference_agent = state['reference']
+        generations = state['generations']
+        iteration = state['iteration']
+        total_games = state['total_games']
+        logf.write('Resumed at %s: iteration %d, %d games so far, '
+                   'reference %s\n' % (datetime.datetime.now(), iteration,
+                                       total_games, reference_agent))
+        print('Resuming after iteration %d (%d games), reference %s' % (
+            iteration, total_games, reference_agent))
+    else:
+        logf.write('Starting from %s at %s\n' % (
+            args.lagent, datetime.datetime.now()))
+        logf.write('Referencing from %s at %s\n' % (
+            args.ragent, datetime.datetime.now()))
+        reference_agent = args.ragent
+        total_games = 0
+        iteration = 0
+        shutil.copy(args.lagent, training_agent)
+        generations = []      # snapshot names, in order, for Elo matches
+        if args.elo_games:
+            generations.append(save_generation(args.work_dir, training_agent, 0))
+    start_iteration = iteration
     while True:
         print('Reference: %s' % (reference_agent,))
         logf.write('Total games so far %d\n' % (total_games,))
@@ -581,7 +635,7 @@ def main():
                             total_games, logf)
 
         logf.flush()
-        if args.max_iterations and iteration >= args.max_iterations:
+        if args.max_iterations and iteration - start_iteration >= args.max_iterations:
             break
     logf.close()
 

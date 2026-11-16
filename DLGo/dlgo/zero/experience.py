@@ -1,5 +1,13 @@
 import numpy as np
 
+# Compact storage types. Board planes from the zero encoder are 0/1, visit
+# counts are bounded by the MCTS rounds per move, rewards are +1/-1. Storing
+# these instead of float64 makes experience files ~8x smaller; training
+# converts to float32 when it uses them.
+STATE_DTYPE = np.uint8
+VISIT_DTYPE = np.uint16
+REWARD_DTYPE = np.int8
+
 __all__ = [
     'ZeroExperienceCollector',
     'ZeroExperienceBuffer',
@@ -22,8 +30,10 @@ class ZeroExperienceCollector:
         self._current_episode_visit_counts = []
 
     def record_decision(self, state, visit_counts):
-        self._current_episode_states.append(state)
-        self._current_episode_visit_counts.append(visit_counts)
+        self._current_episode_states.append(
+            np.asarray(state).astype(STATE_DTYPE))
+        self._current_episode_visit_counts.append(
+            np.asarray(visit_counts).astype(VISIT_DTYPE))
 
     def complete_episode(self, reward):
         num_states = len(self._current_episode_states)
@@ -38,9 +48,9 @@ class ZeroExperienceCollector:
 
 class ZeroExperienceBuffer:
     def __init__(self, states, visit_counts, rewards):
-        self.states = states
-        self.visit_counts = visit_counts
-        self.rewards = rewards
+        self.states = np.asarray(states).astype(STATE_DTYPE, copy=False)
+        self.visit_counts = np.asarray(visit_counts).astype(VISIT_DTYPE, copy=False)
+        self.rewards = np.asarray(rewards).astype(REWARD_DTYPE, copy=False)
 
     def serialize(self, h5file):
         h5file.create_group('experience')

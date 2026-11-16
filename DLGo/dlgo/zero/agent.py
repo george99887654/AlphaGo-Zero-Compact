@@ -344,12 +344,14 @@ class ZeroAgent(Agent):
     def train(self, experience, learning_rate, batch_size):     # <1>
         num_examples = experience.states.shape[0]
 
-        model_input = experience.states
+        # Experience is stored in compact integer types; train in float32.
+        model_input = experience.states.astype(np.float32)
+        visit_counts = experience.visit_counts.astype(np.float32)
 
         visit_sums = np.sum(                                    # <2>
-            experience.visit_counts, axis=1).reshape(           # <2>
+            visit_counts, axis=1).reshape(                      # <2>
             (num_examples, 1))                                  # <2>
-        action_target = experience.visit_counts / visit_sums    # <2>
+        action_target = visit_counts / visit_sums               # <2>
 #         HHY
         # Prevent move probs from getting stuck at 0 or 1.
         # Normalize each example (row) separately, not over the whole batch.
@@ -361,7 +363,7 @@ class ZeroAgent(Agent):
         move_probs = move_probs / np.sum(move_probs, axis=1, keepdims=True)
         action_target = move_probs
 #         HHY
-        value_target = experience.rewards
+        value_target = experience.rewards.astype(np.float32)
 
         self.model.compile(
             Adam(
