@@ -133,64 +133,101 @@ def eval_temperature(num_moves):
     return 0.05
 
 
-def play_games_batched(agent1, agent2, num_games, board_size,
-                       temperature_fn, collect=False):
-    """Play `num_games` games between agent1 and agent2 at the same time.
+def play_games_continuous(agent1, agent2, next_game, board_size,
+                          temperature_fn, slots, collect=False,
+                          num_games=None, label=''):
+    """Play games between agent1 and agent2, keeping `slots` games in
+    progress at once: whenever a game ends, the next one from `next_game()`
+    starts in its place, so batches stay full instead of waiting for their
+    longest game.
 
-    agent1 plays black in even-numbered games and white in odd ones. All games
-    advance one move per step; each agent searches all the games where it is
-    to move together, so its network evaluates their positions in batches.
-    Returns (records, agent1_colors, collectors) where collectors is a list of
-    (agent1 collector, agent2 collector) per game, or None if not collecting.
+    `next_game()` returns the next global game number, or None when there
+    are no more. agent1 plays black in even-numbered games and white in odd
+    ones. Each game uses temperature_fn(moves played in that game). Every
+    step, each agent searches all games where it is to move together, so
+    its network evaluates their positions in batches.
+
+    Returns a list of (game number, GameRecord, agent1 colour, collectors)
+    in the order games finished; collectors is (agent1's, agent2's)
+    ZeroExperienceCollector, or None if not collecting.
     """
-    games = [GameState.new_game(board_size) for _ in range(num_games)]
-    agent1_colors = [Player.black if i % 2 == 0 else Player.white
-                     for i in range(num_games)]
-    collectors = None
-    if collect:
-        collectors = []
-        for _ in range(num_games):
-            pair = (zero.ZeroExperienceCollector(),
-                    zero.ZeroExperienceCollector())
-            for c in pair:
-                c.begin_episode()
-            collectors.append(pair)
-    moves = [[] for _ in range(num_games)]
     max_moves = 2 * board_size * board_size
+    games, moves, colors, collectors = {}, {}, {}, {}
+    finished = []
 
-    num_moves = 0
-    active = list(range(num_games))
-    while active:
-        temperature = temperature_fn(num_moves)
+    def start_games():
+        while len(games) < slots:
+            g = next_game()
+            if g is None:
+                return
+            games[g] = GameState.new_game(board_size)
+            moves[g] = []
+            colors[g] = Player.black if g % 2 == 0 else Player.white
+            if collect:
+                pair = (zero.ZeroExperienceCollector(),
+                        zero.ZeroExperienceCollector())
+                for c in pair:
+                    c.begin_episode()
+                collectors[g] = pair
+
+    start_games()
+    while games:
+        active = list(games)
         # Decide who is to move in each game *before* anyone moves, so every
-        # game advances exactly one ply per step (num_moves = ply count).
-        agent1_to_move = {i: games[i].next_player == agent1_colors[i]
-                          for i in active}
+        # game advances exactly one ply per step.
+        agent1_to_move = {g: games[g].next_player == colors[g] for g in active}
         for agent_idx, agent in enumerate((agent1, agent2)):
-            idx = [i for i in active
-                   if agent1_to_move[i] == (agent_idx == 0)]
+            idx = [g for g in active if agent1_to_move[g] == (agent_idx == 0)]
             if not idx:
                 continue
-            agent.set_temperature(temperature)
             chosen = agent.select_moves(
-                [games[i] for i in idx],
-                [collectors[i][agent_idx] for i in idx] if collect else None)
-            for i, move in zip(idx, chosen):
-                moves[i].append(move)
-                games[i] = games[i].apply_move(move)
-        num_moves += 1
-        active = [i for i in active
-                  if not games[i].is_over() and num_moves < max_moves]
+                [games[g] for g in idx],
+                [collectors[g][agent_idx] for g in idx] if collect else None,
+                [temperature_fn(len(moves[g])) for g in idx])
+            for g, move in zip(idx, chosen):
+                moves[g].append(move)
+                games[g] = games[g].apply_move(move)
+        for g in active:
+            if games[g].is_over() or len(moves[g]) >= max_moves:
+                result = scoring.compute_game_result(games[g])
+                record = GameRecord(moves=moves[g], winner=result.winner,
+                                    margin=result.winning_margin)
+                finished.append((g, record, colors[g],
+                                 collectors.get(g) if collect else None))
+                print('%sGame %d%s: %d moves, %s, agent %d wins' % (
+                    label, g + 1, '/%d' % num_games if num_games else '',
+                    len(moves[g]), result,
+                    1 if result.winner == colors[g] else 2))
+                del games[g], moves[g], colors[g]
+                collectors.pop(g, None)
+        start_games()
+    return finished
 
-    records = []
-    for i in range(num_games):
-        result = scoring.compute_game_result(games[i])
-        records.append(GameRecord(moves=moves[i], winner=result.winner,
-                                  margin=result.winning_margin))
-        print('Game %d/%d: %d moves, %s, agent %d wins' % (
-            i + 1, num_games, len(moves[i]), result,
-            1 if result.winner == agent1_colors[i] else 2))
-    return records, agent1_colors, collectors
+
+def play_games_batched(agent1, agent2, num_games, board_size,
+                       temperature_fn, collect=False):
+    """Play `num_games` games between agent1 and agent2 all at the same time
+    (game numbers 0..num_games-1). Returns (records, agent1_colors,
+    collectors) in game order; collectors is None if not collecting."""
+    numbers = iter(range(num_games))
+    done = play_games_continuous(
+        agent1, agent2, lambda: next(numbers, None), board_size,
+        temperature_fn, slots=num_games, collect=collect,
+        num_games=num_games)
+    done.sort(key=lambda item: item[0])
+    records = [rec for _, rec, _, _ in done]
+    colors = [col for _, _, col, _ in done]
+    collectors = [c for _, _, _, c in done] if collect else None
+    return records, colors, collectors
+
+
+def shared_game_source(counter, num_games):
+    """next_game() for play_games_continuous that takes one game at a time
+    from the counter shared by all workers."""
+    def next_game():
+        start, count = claim_games(counter, num_games, 1)
+        return start if count else None
+    return next_game
 
 
 def get_temp_file():
@@ -245,22 +282,18 @@ def do_self_play(board_size, agent1_filename, agent2_filename,
     agent2 = load_agent(agent2_filename)
 
     all_collectors = []
-    while True:
-        start, batch = claim_games(counter, num_games, parallel_games or num_games)
-        if batch == 0:
-            break
-        print('[%s worker %d] Simulating games %d-%d of %d...' % (
-            'GPU' if use_gpu else 'CPU', os.getpid(),
-            start + 1, start + batch, num_games))
-        records, colors1, collectors = play_games_batched(
-            agent1, agent2, batch, board_size,
-            self_play_temperature, collect=True)
-        for record, color1, (collector1, collector2) in zip(
-                records, colors1, collectors):
-            reward1 = 1 if record.winner == color1 else -1
-            collector1.complete_episode(reward=reward1)
-            collector2.complete_episode(reward=-reward1)
-            all_collectors.extend([collector1, collector2])
+    label = '[%s worker %d] ' % ('GPU' if use_gpu else 'CPU', os.getpid())
+    print('%sSimulating self-play games, %d at a time...' % (
+        label, parallel_games or num_games))
+    finished = play_games_continuous(
+        agent1, agent2, shared_game_source(counter, num_games), board_size,
+        self_play_temperature, slots=parallel_games or num_games,
+        collect=True, num_games=num_games, label=label)
+    for _, record, color1, (collector1, collector2) in finished:
+        reward1 = 1 if record.winner == color1 else -1
+        collector1.complete_episode(reward=reward1)
+        collector2.complete_episode(reward=-reward1)
+        all_collectors.extend([collector1, collector2])
 
     all_collectors = [c for c in all_collectors if c.states]
     if not all_collectors:
@@ -398,21 +431,19 @@ def eval_worker(agent1_fname, agent2_fname, num_games, board_size,
     agent2 = load_agent(agent2_fname)
 
     wins, losses = 0, 0
-    while True:
-        start, batch = claim_games(counter, num_games, parallel_games or num_games)
-        if batch == 0:
-            break
-        print('[%s worker %d] Evaluating games %d-%d of %d...' % (
-            'GPU' if use_gpu else 'CPU', os.getpid(),
-            start + 1, start + batch, num_games))
-        records, colors1, _ = play_games_batched(
-            agent1, agent2, batch, board_size, eval_temperature)
-        for record, color1 in zip(records, colors1):
-            if record.winner == color1:
-                wins += 1
-            else:
-                losses += 1
-        print('Agent 1 record (this worker): %d/%d' % (wins, wins + losses))
+    label = '[%s worker %d] ' % ('GPU' if use_gpu else 'CPU', os.getpid())
+    print('%sEvaluating games, %d at a time...' % (
+        label, parallel_games or num_games))
+    finished = play_games_continuous(
+        agent1, agent2, shared_game_source(counter, num_games), board_size,
+        eval_temperature, slots=parallel_games or num_games,
+        num_games=num_games, label=label)
+    for _, record, color1, _ in finished:
+        if record.winner == color1:
+            wins += 1
+        else:
+            losses += 1
+    print('%sAgent 1 record (this worker): %d/%d' % (label, wins, wins + losses))
     results.put((wins, losses))
 
 

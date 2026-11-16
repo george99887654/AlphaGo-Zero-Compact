@@ -229,7 +229,7 @@ class ZeroAgent(Agent):
 # end::zero_select_move_defn[]
         return self.select_moves([game_state], [self.collector])[0]
 
-    def select_moves(self, game_states, collectors=None):
+    def select_moves(self, game_states, collectors=None, temperatures=None):
         """Run MCTS for several independent positions at once and return one
         move per position.
 
@@ -238,9 +238,13 @@ class ZeroAgent(Agent):
         batched call, which is what makes the GPU worthwhile. `collectors`
         is an optional list (one entry per position, may be None) of
         experience collectors to record each root's visit counts into.
+        `temperatures` optionally gives each position its own move-sampling
+        temperature (default: self.temperature for all).
         """
         if collectors is None:
             collectors = [None] * len(game_states)
+        if temperatures is None:
+            temperatures = [self.temperature] * len(game_states)
         roots = self.create_nodes(game_states)                 # <1>
 
         for i in range(self.num_rounds):                       # <2>
@@ -274,9 +278,9 @@ class ZeroAgent(Agent):
                 for (node, slot), child in zip(pending, children):
                     self.back_up(node, slot, -1 * child.value)     # <1>
 
-        return [self.finish_search(root, game_state, collector)
-                for root, game_state, collector
-                in zip(roots, game_states, collectors)]
+        return [self.finish_search(root, game_state, collector, temperature)
+                for root, game_state, collector, temperature
+                in zip(roots, game_states, collectors, temperatures)]
 
 # tag::zero_back_up[]
     @staticmethod
@@ -291,7 +295,7 @@ class ZeroAgent(Agent):
             value = -1 * value
 # end::zero_back_up[]
 
-    def finish_search(self, root, game_state, collector):
+    def finish_search(self, root, game_state, collector, temperature=None):
         """Record the search result and pick the move to play."""
         visit_counts = root.visit_count_vector(self.encoder.num_moves())
         if visit_counts.sum() == 0:
@@ -313,7 +317,7 @@ class ZeroAgent(Agent):
 
 # end::zero_record_collector[]
 
-        move = self.sample_move(root, visit_counts)
+        move = self.sample_move(root, visit_counts, temperature)
 
         # Search estimate for the chosen move, from our point of view: the
         # mean backed-up value of that branch (or of the root if unvisited).
@@ -342,13 +346,15 @@ class ZeroAgent(Agent):
         """Details of the last search (shown by the web demo)."""
         return dict(self.last_search)
 
-    def sample_move(self, root, visit_counts):
+    def sample_move(self, root, visit_counts, temperature=None):
         """Pick the move to play from the root's visit counts, sharpened by
         the current temperature."""
 # HHY
         move_probs = visit_counts / self.num_rounds
         # Prevent move probs from getting stuck at 0 or 1.
-        move_probs = np.power(move_probs, 1.0 / self.temperature)
+        if temperature is None:
+            temperature = self.temperature
+        move_probs = np.power(move_probs, 1.0 / temperature)
         move_probs = move_probs / np.sum(move_probs)
         eps = 1e-6
         move_probs = np.clip(move_probs, eps, 1 - eps)
