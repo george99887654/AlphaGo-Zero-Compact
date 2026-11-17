@@ -264,31 +264,81 @@ def claim_games(counter, num_games, batch_size):
     return start, count
 
 
+def start_inference_server(model_files, num_workers):
+    """Start the GPU inference server process for `num_workers` search
+    workers. Returns (server process, per-worker connection tuples)."""
+    request_q = multiprocessing.Queue()
+    response_qs = [multiprocessing.Queue() for _ in range(num_workers)]
+    server = multiprocessing.Process(
+        target=zero.run_inference_server,
+        args=(list(model_files), request_q, response_qs))
+    server.start()
+    return server, [(request_q, response_qs[i], i) for i in range(num_workers)]
+
+
+def stop_inference_server(server):
+    """Wait for the server to exit after all workers said 'done'."""
+    server.join(timeout=60)
+    if server.is_alive():
+        server.terminate()
+        server.join()
+
+
+def load_worker_agents(agent1_filename, agent2_filename, remote):
+    """Load the two agents for a worker. With `remote` (a connection tuple
+    from start_inference_server) the networks are not built locally: the
+    agents send their evaluations to the inference server instead
+    (model key 0 = agent1, 1 = agent2)."""
+    if remote is None:
+        return load_agent(agent1_filename), load_agent(agent2_filename)
+    request_q, response_q, worker_id = remote
+    agents = []
+    for key, filename in enumerate((agent1_filename, agent2_filename)):
+        with h5py.File(filename, 'r') as h5file:
+            agent = zero.load_zero_agent(h5file, load_model=False)
+        agent.infer = zero.RemoteInference(request_q, response_q,
+                                           worker_id, key)
+        agents.append(agent)
+    return agents
+
+
+def worker_label(use_gpu, remote):
+    kind = 'search' if remote is not None else ('GPU' if use_gpu else 'CPU')
+    return '[%s worker %d] ' % (kind, os.getpid())
+
+
 def do_self_play(board_size, agent1_filename, agent2_filename,
                  num_games,
                  experience_filename,
                  counter,
                  parallel_games=32,
-                 use_gpu=True):
+                 use_gpu=True,
+                 remote=None):
     """Worker: play self-play games in batches of `parallel_games`, taking
     batches from the shared `counter` until `num_games` games have been
-    claimed across all workers, and save the experience it collected."""
-    configure_worker(use_gpu)
+    claimed across all workers, and save the experience it collected.
+    With `remote`, network evaluations go to the GPU inference server."""
+    configure_worker(use_gpu and remote is None)
 
     random.seed(int(time.time()) + os.getpid())
     np.random.seed(int(time.time()) + os.getpid())
 
-    agent1 = load_agent(agent1_filename)
-    agent2 = load_agent(agent2_filename)
+    try:
+        agent1, agent2 = load_worker_agents(
+            agent1_filename, agent2_filename, remote)
+        label = worker_label(use_gpu, remote)
+        print('%sSimulating self-play games, %d at a time...' % (
+            label, parallel_games or num_games))
+        finished = play_games_continuous(
+            agent1, agent2, shared_game_source(counter, num_games),
+            board_size, self_play_temperature,
+            slots=parallel_games or num_games,
+            collect=True, num_games=num_games, label=label)
+    finally:
+        if remote is not None:
+            remote[0].put(('done', remote[2]))
 
     all_collectors = []
-    label = '[%s worker %d] ' % ('GPU' if use_gpu else 'CPU', os.getpid())
-    print('%sSimulating self-play games, %d at a time...' % (
-        label, parallel_games or num_games))
-    finished = play_games_continuous(
-        agent1, agent2, shared_game_source(counter, num_games), board_size,
-        self_play_temperature, slots=parallel_games or num_games,
-        collect=True, num_games=num_games, label=label)
     for _, record, color1, (collector1, collector2) in finished:
         reward1 = 1 if record.winner == color1 else -1
         collector1.complete_episode(reward=reward1)
@@ -306,10 +356,15 @@ def do_self_play(board_size, agent1_filename, agent2_filename,
 
 def generate_experience(learning_agent, reference_agent, exp_file,
                         num_games, board_size, num_workers,
-                        parallel_games=32, gpu_workers=1):
+                        parallel_games=32, gpu_workers=1,
+                        inference_server=False):
     experience_files = []
     workers = []
     counter = multiprocessing.Value('i', 0)
+    server, remotes = None, [None] * num_workers
+    if inference_server:
+        server, remotes = start_inference_server(
+            (learning_agent, reference_agent), num_workers)
     for i in range(num_workers):
         filename = get_temp_file()
         experience_files.append(filename)
@@ -324,6 +379,7 @@ def generate_experience(learning_agent, reference_agent, exp_file,
                 counter,
                 parallel_games,
                 i < gpu_workers,
+                remotes[i],
             )
         )
         worker.start()
@@ -333,6 +389,8 @@ def generate_experience(learning_agent, reference_agent, exp_file,
     print('Waiting for workers...')
     for worker in workers:
         worker.join()
+    if server is not None:
+        stop_inference_server(server)
     failed = [w.exitcode for w in workers if w.exitcode != 0]
     if failed:
         raise RuntimeError('%d self-play worker(s) failed' % len(failed))
@@ -419,25 +477,35 @@ def play_games(args):
     return wins, losses
 
 def eval_worker(agent1_fname, agent2_fname, num_games, board_size,
-                counter, results, parallel_games=32, use_gpu=True):
+                counter, results, parallel_games=32, use_gpu=True,
+                remote=None):
     """Worker: play evaluation games (agent1 vs agent2) in batches claimed
-    from the shared counter; put (wins, losses) for agent1 on `results`."""
-    configure_worker(use_gpu)
+    from the shared counter; put (wins, losses) for agent1 on `results`.
+    With `remote`, network evaluations go to the GPU inference server."""
+    configure_worker(use_gpu and remote is None)
 
     random.seed(int(time.time()) + os.getpid())
     np.random.seed(int(time.time()) + os.getpid())
 
-    agent1 = load_agent(agent1_fname)
-    agent2 = load_agent(agent2_fname)
+    try:
+        agent1, agent2 = load_worker_agents(agent1_fname, agent2_fname,
+                                            remote)
+        label = worker_label(use_gpu, remote)
+        print('%sEvaluating games, %d at a time...' % (
+            label, parallel_games or num_games))
+        finished = play_games_continuous(
+            agent1, agent2, shared_game_source(counter, num_games),
+            board_size, eval_temperature,
+            slots=parallel_games or num_games,
+            num_games=num_games, label=label)
+    except BaseException:
+        results.put((0, 0))     # keep evaluate() from waiting forever
+        raise
+    finally:
+        if remote is not None:
+            remote[0].put(('done', remote[2]))
 
     wins, losses = 0, 0
-    label = '[%s worker %d] ' % ('GPU' if use_gpu else 'CPU', os.getpid())
-    print('%sEvaluating games, %d at a time...' % (
-        label, parallel_games or num_games))
-    finished = play_games_continuous(
-        agent1, agent2, shared_game_source(counter, num_games), board_size,
-        eval_temperature, slots=parallel_games or num_games,
-        num_games=num_games, label=label)
     for _, record, color1, _ in finished:
         if record.winner == color1:
             wins += 1
@@ -449,15 +517,20 @@ def eval_worker(agent1_fname, agent2_fname, num_games, board_size,
 
 def evaluate(learning_agent, reference_agent,
              num_games, num_workers, board_size,
-             parallel_games=32, gpu_workers=1):
+             parallel_games=32, gpu_workers=1, inference_server=False):
     counter = multiprocessing.Value('i', 0)
     results = multiprocessing.Queue()
     workers = []
+    server, remotes = None, [None] * num_workers
+    if inference_server:
+        server, remotes = start_inference_server(
+            (learning_agent, reference_agent), num_workers)
     for i in range(num_workers):
         worker = multiprocessing.Process(
             target=eval_worker,
             args=(learning_agent, reference_agent, num_games, board_size,
-                  counter, results, parallel_games, i < gpu_workers))
+                  counter, results, parallel_games, i < gpu_workers,
+                  remotes[i]))
         worker.start()
         workers.append(worker)
     # Collect results before joining (a process with queued data cannot exit
@@ -465,6 +538,10 @@ def evaluate(learning_agent, reference_agent,
     game_results = [results.get() for _ in workers]
     for worker in workers:
         worker.join()
+    if server is not None:
+        stop_inference_server(server)
+    if any(w.exitcode != 0 for w in workers):
+        raise RuntimeError('evaluation worker(s) failed')
 
     total_wins = sum(w for w, _ in game_results)
     total_losses = sum(l for _, l in game_results)
@@ -520,7 +597,8 @@ def run_elo_matches(args, generations, training_agent, iteration,
             num_workers=args.num_workers,
             board_size=args.board_size,
             parallel_games=args.parallel_games,
-            gpu_workers=args.gpu_workers)
+            gpu_workers=args.gpu_workers,
+            inference_server=args.inference_server)
         losses = args.elo_games - wins
         elo.append_match(matches_file, iteration, total_games,
                          name, opp, wins, losses)
@@ -613,7 +691,12 @@ def main():
                              'every iteration, e.g. ../schematics')
     parser.add_argument('--gpu-workers', type=int, default=1,
                         help='how many of the --num-workers use the GPU; the '
-                             'rest run single-threaded on the CPU')
+                             'rest run single-threaded on the CPU (ignored '
+                             'with --inference-server)')
+    parser.add_argument('--inference-server', action='store_true',
+                        help='one process evaluates the network on the GPU '
+                             'for all --num-workers search workers, which '
+                             'then do only the tree search on the CPU')
 
     args = parser.parse_args()
     if not args.resume and not (args.lagent and args.ragent):
@@ -664,7 +747,8 @@ def main():
                 board_size=args.board_size,
                 num_workers=args.num_workers,
                 parallel_games=args.parallel_games,
-                gpu_workers=args.gpu_workers)
+                gpu_workers=args.gpu_workers,
+                inference_server=args.inference_server)
             train_on_experience(
                 training_agent, tmp_agent, experience_file,
                 lr=args.lr, batch_size=args.bs)
@@ -677,7 +761,8 @@ def main():
             num_workers=args.num_workers,
             board_size=args.board_size,
             parallel_games=args.parallel_games,
-            gpu_workers=args.gpu_workers)
+            gpu_workers=args.gpu_workers,
+            inference_server=args.inference_server)
         num_eval = args.eval_games
         print('Won %d / %d games (%.3f)' % (
             wins, num_eval, float(wins) / num_eval))

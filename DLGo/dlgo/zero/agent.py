@@ -515,8 +515,12 @@ def move_number(game_state):
     return n
 
 
-def load_zero_agent(h5file):
-    model = kerasutil.load_model_from_hdf5_group(h5file['model'])
+def load_zero_agent(h5file, load_model=True):
+    """Load a ZeroAgent. With load_model=False the network is not built
+    (agent.model is None) and agent.infer must be replaced, e.g. with a
+    RemoteInference that asks the GPU inference server."""
+    model = (kerasutil.load_model_from_hdf5_group(h5file['model'])
+             if load_model else None)
     encoder_name = h5file['encoder'].attrs['name']
     if not isinstance(encoder_name, str):
         encoder_name = encoder_name.decode('ascii')
