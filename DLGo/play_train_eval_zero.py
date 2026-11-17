@@ -176,14 +176,17 @@ def play_games_continuous(agent1, agent2, next_game, board_size,
         # Decide who is to move in each game *before* anyone moves, so every
         # game advances exactly one ply per step.
         agent1_to_move = {g: games[g].next_player == colors[g] for g in active}
+        # Both agents search in lock-step, so each search round evaluates
+        # the leaves of all games together.
+        jobs, game_lists = [], []
         for agent_idx, agent in enumerate((agent1, agent2)):
             idx = [g for g in active if agent1_to_move[g] == (agent_idx == 0)]
-            if not idx:
-                continue
-            chosen = agent.select_moves(
-                [games[g] for g in idx],
+            game_lists.append(idx)
+            jobs.append((
+                agent, [games[g] for g in idx],
                 [collectors[g][agent_idx] for g in idx] if collect else None,
-                [temperature_fn(len(moves[g])) for g in idx])
+                [temperature_fn(len(moves[g])) for g in idx]))
+        for idx, chosen in zip(game_lists, zero.select_moves_multi(jobs)):
             for g, move in zip(idx, chosen):
                 moves[g].append(move)
                 games[g] = games[g].apply_move(move)
@@ -296,8 +299,8 @@ def load_worker_agents(agent1_filename, agent2_filename, remote):
     for key, filename in enumerate((agent1_filename, agent2_filename)):
         with h5py.File(filename, 'r') as h5file:
             agent = zero.load_zero_agent(h5file, load_model=False)
-        agent.infer = zero.RemoteInference(request_q, response_q,
-                                           worker_id, key)
+        agent.remote = zero.RemoteInference(request_q, response_q,
+                                            worker_id, key)
         agents.append(agent)
     return agents
 

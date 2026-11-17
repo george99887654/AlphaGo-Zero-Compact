@@ -393,7 +393,8 @@ body { margin: 0; }
           <tr><td>main</td><td>Parses options, copies the starting agent to the learner, then loops self-play → train → gate → Elo.</td><td class="calls">command line</td></tr>
           <tr><td>generate_experience</td><td>Starts the self-play workers, waits for them, merges their experience files into <code>zero_exp_temp.hdf5</code>.</td><td class="calls">main</td></tr>
           <tr><td>do_self_play</td><td>Worker process: loads both agents, claims batches of games, completes each game's episodes with ±1 rewards, saves experience.</td><td class="calls">generate_experience</td></tr>
-          <tr><td>play_games_batched</td><td>Plays N games at once; at every step each agent searches all games where it is to move with one <code>select_moves</code> call.</td><td class="calls">do_self_play, eval_worker</td></tr>
+          <tr><td>play_games_continuous</td><td>Keeps <code>-p</code> games in progress per worker, refilling finished slots; each step both agents search their games in lock-step with one <code>select_moves_multi</code> call.</td><td class="calls">do_self_play, eval_worker</td></tr>
+          <tr><td>start_inference_server / load_worker_agents</td><td>With <code>--inference-server</code>: starts the GPU process and gives each search worker agents that send their evaluations to it instead of building a network.</td><td class="calls">generate_experience, evaluate, workers</td></tr>
           <tr><td>configure_worker</td><td>GPU worker: memory growth. CPU worker: hides the GPU and uses one TF thread.</td><td class="calls">workers</td></tr>
           <tr><td>claim_games</td><td>Takes the next batch of game numbers from a shared counter (load balancing).</td><td class="calls">workers</td></tr>
           <tr><td>train_on_experience / train_worker</td><td>Trains the learner on the latest experience in a separate process and saves it.</td><td class="calls">main</td></tr>
@@ -401,15 +402,21 @@ body { margin: 0; }
           <tr><td>run_elo_matches</td><td>Saves <code>gen_NNNN.hdf5</code>, plays it against gen 0 and the previous generation, refits ratings, rewrites the report.</td><td class="calls">main (with --elo-games)</td></tr>
 
           <tr class="group"><td colspan="3">dlgo/zero/agent.py: search and learning</td></tr>
-          <tr><td>ZeroAgent.select_moves</td><td>Batched MCTS for several positions; returns one move each.</td><td class="calls">play_games_batched, select_move</td></tr>
+          <tr><td>select_moves_multi</td><td>Batched MCTS for several agents in lock-step: every round, the leaves of all their trees are evaluated together (one server request per round).</td><td class="calls">play_games_continuous, select_moves</td></tr>
+          <tr><td>ZeroAgent.select_moves</td><td>Batched MCTS for several positions of one agent; returns one move each.</td><td class="calls">select_move, web demo</td></tr>
           <tr><td>ZeroAgent.select_move</td><td>Single-position search, used by the web demo and GTP.</td><td class="calls">httpfrontend, gtp</td></tr>
-          <tr><td>create_nodes / infer</td><td>Encodes positions under a random symmetry, runs the network once for the whole batch, builds tree nodes.</td><td class="calls">select_moves</td></tr>
+          <tr><td>evaluate_many / encode_states / evaluate_encoded</td><td>Encodes positions as uint8 planes with a random symmetry each, then evaluates them locally (<code>infer</code>) or on the inference server; returns normalised priors in the original orientation and values.</td><td class="calls">select_moves_multi</td></tr>
+          <tr><td>create_nodes</td><td>Builds tree nodes from the evaluation (Dirichlet noise on roots).</td><td class="calls">select_moves_multi</td></tr>
           <tr><td>select_branch</td><td>Vectorized PUCT choice of the next child.</td><td class="calls">select_moves</td></tr>
           <tr><td>ZeroTreeNode</td><td>One search position: its legal moves (no filling our own eyes; passing only when nothing else is legal), priors, visit counts and values as arrays.</td><td class="calls">create_nodes</td></tr>
           <tr><td>back_up / terminal_value</td><td>Propagates a value to the root with alternating sign; scores finished games for real.</td><td class="calls">select_moves</td></tr>
           <tr><td>finish_search</td><td>Records visit counts ×8 symmetries into the collector, samples the move at the current temperature.</td><td class="calls">select_moves</td></tr>
           <tr><td>train</td><td>Turns visit counts into per-row policy targets, compiles with Adam, fits policy (cross-entropy) and value (MSE).</td><td class="calls">train_worker</td></tr>
           <tr><td>load_zero_agent / serialize</td><td>Reads or writes the agent file: encoder name, board size, Keras model.</td><td class="calls">everywhere</td></tr>
+
+          <tr class="group"><td colspan="3">dlgo/zero/inference.py: GPU inference server</td></tr>
+          <tr><td>run_inference_server</td><td>Owns the GPU: waits for every worker's request, merges them into one batch per model, applies the symmetry, network, inverse symmetry and normalisation on the GPU, and replies.</td><td class="calls">start_inference_server</td></tr>
+          <tr><td>RemoteInference</td><td>A worker's connection to the server; one request per search round for both agents.</td><td class="calls">evaluate_many</td></tr>
 
           <tr class="group"><td colspan="3">Model, data and ratings</td></tr>
           <tr><td>networks.dual_residual_network</td><td>Builds the 8-block residual tower with policy (82 moves) and value heads; channels-last inside.</td><td class="calls">init_zero_agent_v2</td></tr>

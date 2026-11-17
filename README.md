@@ -44,12 +44,15 @@ Python-bound, so use one GPU worker (`--gpu-workers 1`; several processes
 sharing one GPU are slower on Windows) plus single-threaded CPU workers on the
 remaining cores (`-w` = total workers). Workers take batches of games from a
 shared queue, so faster workers simply play more games.
-With `--inference-server` one process owns the GPU and evaluates the network
-for all `-w` workers, merging their positions into one batch per call; the
-workers then only do the tree search on the CPU (`--gpu-workers` is ignored).
-On a Ryzen 7 3700X + GPU this plays 16% more moves per second than the hybrid
-setup with less than half the CPU load (`-w 4 -p 32`: 21% vs 47%), or 45% more
-moves at 29% CPU with `-w 7 -p 16`.
+With `--inference-server` one process owns the GPU and does all network work
+for the `-w` search workers: each search round, every worker sends the encoded
+leaves of all its games (both agents) in one request, and the server waits for
+all workers, merges them into one batch per model and applies the board
+symmetries, the network and the prior normalisation on the GPU. The workers
+only run the tree search (`--gpu-workers` is ignored). A GPU call costs about
+the same for 8 or 256 positions, so give it big batches: on a Ryzen 7 3700X +
+RTX 3080, `-w 4 -p 64` (about 124 positions per call) plays 83 moves/s at 20%
+CPU, versus 39 moves/s at 47% CPU for the hybrid `-w 7 --gpu-workers 1 -p 16`.
 
 Each iteration plays `--rounds-per-eval` (default 10) rounds of `-g` self-play
 games, trains on each round, then plays `--eval-games` (default 100) against the

@@ -14,7 +14,9 @@ from ..agent import Agent
 
 __all__ = [
     'ZeroAgent',
+    'evaluate_many',
     'load_zero_agent',
+    'select_moves_multi',
 ]
 
 def legal_non_eye_moves(state, all_moves):
@@ -206,6 +208,9 @@ class ZeroAgent(Agent):
         self.num_rounds = rounds_per_move
         self.c = c
         self._infer_fn = None
+        # Set to a RemoteInference to evaluate positions on the GPU
+        # inference server instead of with self.model.
+        self.remote = None
         # Decode every encoder move index once (hot in the search).
         self.all_moves = [encoder.decode_move_index(idx)
                           for idx in range(encoder.num_moves())]
@@ -241,46 +246,30 @@ class ZeroAgent(Agent):
         `temperatures` optionally gives each position its own move-sampling
         temperature (default: self.temperature for all).
         """
-        if collectors is None:
-            collectors = [None] * len(game_states)
-        if temperatures is None:
-            temperatures = [self.temperature] * len(game_states)
-        roots = self.create_nodes(game_states)                 # <1>
+        return select_moves_multi(
+            [(self, game_states, collectors, temperatures)])[0]
 
-        for i in range(self.num_rounds):                       # <2>
-            # Walk down every tree to a leaf.
-            pending = []
-            for root in roots:
+    def walk_to_leaves(self, roots):
+        """One selection pass down every tree. Terminal positions back up
+        their actual result; returns the leaves to expand as (node, slot)."""
+        pending = []
+        for root in roots:
 # tag::zero_walk_down[]
-                node = root
+            node = root
+            slot = self.select_branch(node)
+            while slot is not None and node.has_child(slot):  # <3>
+                node = node.get_child(slot)
                 slot = self.select_branch(node)
-                while slot is not None and node.has_child(slot):  # <3>
-                    node = node.get_child(slot)
-                    slot = self.select_branch(node)
 # end::zero_walk_down[]
-                if slot is None:
-                    # Terminal position (game over / no legal moves): back
-                    # up the actual result instead of expanding further.
-                    if node.parent is not None:
-                        self.back_up(node.parent, node.last_slot,
-                                     -1 * self.terminal_value(node.state))
-                else:
-                    pending.append((node, slot))
-
-            # Expand all leaves with one batched network evaluation.
-            if pending:
-                new_states = [node.state.apply_move(node.branch_moves[slot])
-                              for node, slot in pending]
-                children = self.create_nodes(
-                    new_states,
-                    slots=[slot for _, slot in pending],
-                    parents=[node for node, _ in pending])
-                for (node, slot), child in zip(pending, children):
-                    self.back_up(node, slot, -1 * child.value)     # <1>
-
-        return [self.finish_search(root, game_state, collector, temperature)
-                for root, game_state, collector, temperature
-                in zip(roots, game_states, collectors, temperatures)]
+            if slot is None:
+                # Terminal position (game over / no legal moves): back up
+                # the actual result instead of expanding further.
+                if node.parent is not None:
+                    self.back_up(node.parent, node.last_slot,
+                                 -1 * self.terminal_value(node.state))
+            else:
+                pending.append((node, slot))
+        return pending
 
 # tag::zero_back_up[]
     @staticmethod
@@ -412,37 +401,57 @@ class ZeroAgent(Agent):
     def create_node(self, game_state, slot=None, parent=None):
         return self.create_nodes([game_state], [slot], [parent])[0]
 
-    def create_nodes(self, game_states, slots=None, parents=None):
+    def encode_states(self, game_states):
+        """Encode positions for the network: (uint8 planes of shape
+        (n, planes, N, N), a random board symmetry index per position)."""
+        indices = np.random.randint(8, size=len(game_states))
+        planes = np.array([self.encoder.encode(state)
+                           for state in game_states], dtype=np.uint8)
+        return planes, indices
+
+    def evaluate_encoded(self, planes, indices):
+        """Evaluate each position under its symmetry and map the priors back
+        to the original orientation. Returns (priors normalised per row,
+        values of shape (n,))."""
+        if self.remote is not None:
+            return self.remote.evaluate(
+                [(self.remote.model_key, planes, indices)])[0]
+        model_input = np.array([
+            symmetry_reflection_tensor(board_tensor=plane, index=index)
+            for plane, index in zip(planes, indices)], dtype=np.float32)
+        all_priors, all_values = self.infer(model_input)
+        priors = np.array([
+            symmetry_reflection_vector(board_vector=prior, index=index,
+                                       inverse=True)
+            for prior, index in zip(all_priors, indices)])
+        priors = priors / np.sum(priors, axis=1, keepdims=True)
+        return priors, all_values[:, 0]
+
+    def create_nodes(self, game_states, slots=None, parents=None,
+                     evaluation=None):
         """Create tree nodes for several positions with one network call.
-        slots[k] is the branch of parents[k] that leads to game_states[k]."""
+        slots[k] is the branch of parents[k] that leads to game_states[k].
+        `evaluation` is the (priors, values) of these positions if already
+        computed (see evaluate_many)."""
         n = len(game_states)
         if slots is None:
             slots = [None] * n
         if parents is None:
             parents = [None] * n
-#         HHY
-        # Evaluate each position under a random board symmetry, then map
-        # the priors back to the original orientation.
-        indices = np.random.randint(8, size=n)
-        model_input = np.array([
-            symmetry_reflection_tensor(
-                board_tensor=self.encoder.encode(state), index=index)
-            for state, index in zip(game_states, indices)])     # <1>
-        all_priors, all_values = self.infer(model_input)
+        if evaluation is None:
+            evaluation = self.evaluate_encoded(
+                *self.encode_states(game_states))
+        all_priors, all_values = evaluation
 
         nodes = []
         for k in range(n):
-            priors = symmetry_reflection_vector(
-                board_vector=all_priors[k], index=indices[k], inverse=True)
-            priors = priors / np.sum(priors)
-#         HHY
-
+            priors = all_priors[k]
             # Add Dirichlet noise to the root node.
             if parents[k] is None:
                 noise = np.random.dirichlet(
                     0.03 * np.ones_like(priors))
                 priors = 0.75 * priors + 0.25 * noise
-            value = all_values[k][0]                           # <2>
+            value = all_values[k]                              # <2>
             new_node = ZeroTreeNode(
                 game_states[k], value, priors,
                 parents[k], slots[k], self.all_moves,
@@ -505,6 +514,79 @@ class ZeroAgent(Agent):
         h5file.create_group('model')
         kerasutil.save_model_to_hdf5_group(self.model, h5file['model'])
 # end::serialize[] HHY
+def evaluate_many(agents, state_lists):
+    """Network evaluation of state_lists[k] by agents[k] (see
+    ZeroAgent.evaluate_encoded). When all agents use the same inference
+    server connection, everything goes in a single round trip."""
+    encoded = [agent.encode_states(states)
+               for agent, states in zip(agents, state_lists)]
+    remotes = [agent.remote for agent in agents]
+    if remotes and all(r is not None and r.same_connection(remotes[0])
+                       for r in remotes):
+        return remotes[0].evaluate(
+            [(r.model_key, planes, indices)
+             for r, (planes, indices) in zip(remotes, encoded)])
+    return [agent.evaluate_encoded(planes, indices)
+            for agent, (planes, indices) in zip(agents, encoded)]
+
+
+def select_moves_multi(jobs):
+    """Run ZeroAgent.select_moves for several agents in lock-step.
+
+    jobs is a list of (agent, game_states, collectors, temperatures)
+    (collectors / temperatures may be None). Every search round, the leaves
+    of all agents' trees are evaluated together, so with an inference
+    server each round is one request. Returns one list of moves per job.
+    """
+    jobs = [(agent, list(states),
+             list(collectors) if collectors is not None
+             else [None] * len(states),
+             list(temperatures) if temperatures is not None
+             else [agent.temperature] * len(states))
+            for agent, states, collectors, temperatures in jobs]
+    live = [k for k, job in enumerate(jobs) if job[1]]
+    roots = [None] * len(jobs)
+    evaluations = evaluate_many([jobs[k][0] for k in live],
+                                [jobs[k][1] for k in live])
+    for k, evaluation in zip(live, evaluations):
+        roots[k] = jobs[k][0].create_nodes(jobs[k][1], evaluation=evaluation)
+
+    num_rounds = max([jobs[k][0].num_rounds for k in live] or [0])
+    for i in range(num_rounds):                                # <2>
+        expand = []
+        for k in live:
+            agent = jobs[k][0]
+            if i >= agent.num_rounds:
+                continue
+            pending = agent.walk_to_leaves(roots[k])
+            if pending:
+                new_states = [node.state.apply_move(node.branch_moves[slot])
+                              for node, slot in pending]
+                expand.append((k, pending, new_states))
+        if not expand:
+            continue
+        # Expand all leaves with one batched network evaluation.
+        evaluations = evaluate_many([jobs[k][0] for k, _, _ in expand],
+                                    [states for _, _, states in expand])
+        for (k, pending, new_states), evaluation in zip(expand, evaluations):
+            agent = jobs[k][0]
+            children = agent.create_nodes(
+                new_states,
+                slots=[slot for _, slot in pending],
+                parents=[node for node, _ in pending],
+                evaluation=evaluation)
+            for (node, slot), child in zip(pending, children):
+                agent.back_up(node, slot, -1 * child.value)     # <1>
+
+    results = []
+    for k, (agent, states, collectors, temperatures) in enumerate(jobs):
+        results.append([
+            agent.finish_search(root, state, collector, temperature)
+            for root, state, collector, temperature
+            in zip(roots[k] or [], states, collectors, temperatures)])
+    return results
+
+
 
 def move_number(game_state):
     """Number of moves played to reach game_state."""
@@ -517,7 +599,7 @@ def move_number(game_state):
 
 def load_zero_agent(h5file, load_model=True):
     """Load a ZeroAgent. With load_model=False the network is not built
-    (agent.model is None) and agent.infer must be replaced, e.g. with a
+    (agent.model is None) and agent.remote must be set to a
     RemoteInference that asks the GPU inference server."""
     model = (kerasutil.load_model_from_hdf5_group(h5file['model'])
              if load_model else None)
