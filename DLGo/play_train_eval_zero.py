@@ -5,6 +5,7 @@ import glob
 import multiprocessing
 import os
 import random
+import re
 import shutil
 import time
 import tempfile
@@ -572,8 +573,50 @@ def generation_of(agent_file, work_dir, generations):
     return None
 
 
+def reference_generations(work_dir, rows, reference_agent, generations):
+    """(current reference generation, promoted generations in order).
+
+    Every promotion saves the learner as zero_agent_v2_<total games>.hdf5,
+    a copy of the generation snapshot taken after that many games, so the
+    game count in the file name identifies the generation."""
+    by_games = {r['total_games']: r['generation'] for r in rows
+                if r['generation'] != generations[0]}
+
+    def gen_of(path):
+        m = re.match(r'zero_agent_v2_(\d+)\.hdf5$', os.path.basename(path or ''))
+        return by_games.get(int(m.group(1))) if m else None
+
+    promoted = [g for g in (gen_of(f) for f in sorted(glob.glob(
+        os.path.join(work_dir, 'zero_agent_v2_*.hdf5')))) if g]
+    current = gen_of(reference_agent)
+    if current is None and reference_agent:
+        # The starting reference (nothing promoted yet): usually gen 0.
+        current = generation_of(reference_agent, work_dir, generations[:1])
+    return current, promoted
+
+
+def write_elo_report(work_dir, generations, reference_agent, report_dir=None):
+    """Refit the ratings from the match history and rewrite elo.csv and
+    elo_report.html (also copied to report_dir). Returns the ratings."""
+    matches = elo.load_matches(os.path.join(work_dir, 'elo_matches.csv'))
+    ratings = elo.fit_ratings(matches, anchor=generations[0])
+    rows = elo.write_ratings(os.path.join(work_dir, 'elo.csv'),
+                             ratings, matches)
+    current, promoted = reference_generations(work_dir, rows,
+                                              reference_agent, generations)
+    report = os.path.join(work_dir, 'elo_report.html')
+    elo.write_html_report(report, rows, matches, reference=current,
+                          promoted=promoted)
+    if report_dir:
+        os.makedirs(report_dir, exist_ok=True)
+        shutil.copy(report, os.path.join(report_dir, 'rlgo_elo_report.html'))
+        shutil.copy(os.path.join(work_dir, 'elo.csv'),
+                    os.path.join(report_dir, 'rlgo_elo.csv'))
+    return ratings
+
+
 def run_elo_matches(args, generations, training_agent, iteration,
-                    total_games, logf, gating=None):
+                    total_games, logf, gating=None, reference_agent=None):
     """Snapshot the learner as a new generation, play it against
     generation 0 and the most recent generations, and refresh the ratings.
 
@@ -608,17 +651,8 @@ def run_elo_matches(args, generations, training_agent, iteration,
         logf.write('Elo match %s vs %s: %d-%d\n' % (name, opp, wins, losses))
     generations.append(name)
 
-    matches = elo.load_matches(matches_file)
-    ratings = elo.fit_ratings(matches, anchor=generations[0])
-    rows = elo.write_ratings(os.path.join(args.work_dir, 'elo.csv'),
-                             ratings, matches)
-    report = os.path.join(args.work_dir, 'elo_report.html')
-    elo.write_html_report(report, rows, matches)
-    if args.report_dir:
-        os.makedirs(args.report_dir, exist_ok=True)
-        shutil.copy(report, os.path.join(args.report_dir, 'rlgo_elo_report.html'))
-        shutil.copy(os.path.join(args.work_dir, 'elo.csv'),
-                    os.path.join(args.report_dir, 'rlgo_elo.csv'))
+    ratings = write_elo_report(args.work_dir, generations, reference_agent,
+                               args.report_dir)
     print('Elo of %s: %.0f (gen 0 = 0)' % (name, ratings[name]))
     logf.write('Elo of %s after %d games: %.0f\n' % (
         name, total_games, ratings[name]))
@@ -786,7 +820,8 @@ def main():
         iteration += 1
         if args.elo_games:
             run_elo_matches(args, generations, training_agent, iteration,
-                            total_games, logf, gating=gating)
+                            total_games, logf, gating=gating,
+                            reference_agent=reference_agent)
 
         logf.flush()
         if args.max_iterations and iteration - start_iteration >= args.max_iterations:
