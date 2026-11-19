@@ -97,6 +97,17 @@ random gen 0, which every trained generation beats 40-0 and which therefore
 cannot tell how much stronger it is. Generation 0 remains the 0-Elo anchor;
 `--elo-checkpoint gen0` restores the old behaviour.
 
+### Opponent league
+With `--league-opponents 2 --league-games 32`, each self-play round picks 2
+opponents at random from a league of the last 5 promoted references and the
+checkpoints (best of the first 2^n generations) for the 3 largest 2^n below
+the current iteration, leaving out the current reference. Each plays 32 games
+against the learner, and only the learner's moves from those games are used
+for training; the reference plays the remaining `-g` games as before. The mix
+of strong past opponents keeps the learner from overfitting to the current
+reference or forgetting how to beat older styles. The chosen opponents are
+written to the log. Needs `--elo-games` (the league is chosen by Elo).
+
 For a run rated the old way, backfill those checkpoint matches once (with
 training stopped, since both need the GPU):
 ```

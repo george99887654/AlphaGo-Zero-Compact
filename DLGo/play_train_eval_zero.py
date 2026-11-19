@@ -317,11 +317,14 @@ def do_self_play(board_size, agent1_filename, agent2_filename,
                  counter,
                  parallel_games=32,
                  use_gpu=True,
-                 remote=None):
+                 remote=None,
+                 record_agent2=True):
     """Worker: play self-play games in batches of `parallel_games`, taking
     batches from the shared `counter` until `num_games` games have been
     claimed across all workers, and save the experience it collected.
-    With `remote`, network evaluations go to the GPU inference server."""
+    With `remote`, network evaluations go to the GPU inference server.
+    With record_agent2=False only agent 1's (the learner's) moves are
+    kept, e.g. in league games against older generations."""
     configure_worker(use_gpu and remote is None)
 
     random.seed(int(time.time()) + os.getpid())
@@ -347,7 +350,9 @@ def do_self_play(board_size, agent1_filename, agent2_filename,
         reward1 = 1 if record.winner == color1 else -1
         collector1.complete_episode(reward=reward1)
         collector2.complete_episode(reward=-reward1)
-        all_collectors.extend([collector1, collector2])
+        all_collectors.append(collector1)
+        if record_agent2:
+            all_collectors.append(collector2)
 
     all_collectors = [c for c in all_collectors if c.states]
     if not all_collectors:
@@ -361,7 +366,7 @@ def do_self_play(board_size, agent1_filename, agent2_filename,
 def generate_experience(learning_agent, reference_agent, exp_file,
                         num_games, board_size, num_workers,
                         parallel_games=32, gpu_workers=1,
-                        inference_server=False):
+                        inference_server=False, record_reference=True):
     experience_files = []
     workers = []
     counter = multiprocessing.Value('i', 0)
@@ -384,6 +389,7 @@ def generate_experience(learning_agent, reference_agent, exp_file,
                 parallel_games,
                 i < gpu_workers,
                 remotes[i],
+                record_reference,
             )
         )
         worker.start()
@@ -401,9 +407,18 @@ def generate_experience(learning_agent, reference_agent, exp_file,
 
     # Merge experience buffers (workers that got no games left empty files).
     print('Merging experience buffers...')
+    merge_experience_files(experience_files, exp_file)
+
+    # Clean up.
+    for fname in experience_files:
+        os.unlink(fname)
+
+
+def merge_experience_files(filenames, exp_file):
+    """Combine experience files (empty files are skipped) into exp_file."""
     buffers = []
-    for filename in experience_files:
-        if os.path.getsize(filename) == 0:
+    for filename in filenames:
+        if not os.path.exists(filename) or os.path.getsize(filename) == 0:
             continue
         with h5py.File(filename, 'r') as expf:
             buffers.append(zero.load_experience(expf))
@@ -412,9 +427,75 @@ def generate_experience(learning_agent, reference_agent, exp_file,
     with h5py.File(exp_file, 'w') as experience_outf:
         combined_buffer.serialize(experience_outf)
 
-    # Clean up.
-    for fname in experience_files:
-        os.unlink(fname)
+
+def league_pool(work_dir, generations, reference_agent, iteration,
+                promoted_count=5, checkpoint_count=3):
+    """Candidate league opponents for the self-play of `iteration`, as
+    generation names: the last `promoted_count` promoted references and the
+    checkpoints (best of the first 2^n generations) for the
+    `checkpoint_count` largest 2^n < iteration, without duplicates and
+    without the current reference (the main self-play games play it)."""
+    matches = elo.load_matches(os.path.join(work_dir, 'elo_matches.csv'))
+    if not matches or not generations:
+        return []
+    ratings = elo.fit_ratings(matches, anchor=generations[0])
+    rows = elo.rating_rows(ratings, matches)
+    current, promoted = reference_generations(work_dir, rows,
+                                              reference_agent, generations)
+    pool = [g for g in promoted if g != current][-promoted_count:]
+    sizes = []
+    size = checkpoint_window(iteration)
+    while size >= 1 and len(sizes) < checkpoint_count:
+        sizes.append(size)
+        size //= 2
+    for size in sizes:
+        window = generations[:size]
+        if window:
+            pool.append(max(window,
+                            key=lambda g: ratings.get(g, float('-inf'))))
+    available = set(generations)
+    return [g for g in dict.fromkeys(pool)
+            if g != current and g in available]
+
+
+def self_play_round(args, training_agent, reference_agent, generations,
+                    iteration, experience_file, logf):
+    """One round of self-play into experience_file. Without a league this
+    is --games-per-batch games against the reference. With
+    --league-opponents N, N opponents drawn at random from league_pool each
+    play --league-games games against the learner (only the learner's moves
+    are recorded) and the reference plays the rest."""
+    league = []
+    if args.league_opponents and generations:
+        pool = league_pool(args.work_dir, generations, reference_agent,
+                           iteration)
+        league = random.sample(pool, min(args.league_opponents, len(pool)))
+        logf.write('League for iteration %d: %s (pool %s)\n' % (
+            iteration, ', '.join(league) or 'none', ', '.join(pool)))
+        logf.flush()
+    main_games = args.games_per_batch - len(league) * args.league_games
+    parts = []
+    common = dict(board_size=args.board_size, num_workers=args.num_workers,
+                  parallel_games=args.parallel_games,
+                  gpu_workers=args.gpu_workers,
+                  inference_server=args.inference_server)
+    if main_games > 0:
+        part = experience_file + '.main'
+        generate_experience(training_agent, reference_agent, part,
+                            num_games=main_games, **common)
+        parts.append(part)
+    for opponent in league:
+        print('League games: learner vs %s (%d games)' % (
+            opponent, args.league_games))
+        part = experience_file + '.' + opponent
+        generate_experience(training_agent,
+                            os.path.join(args.work_dir, opponent + '.hdf5'),
+                            part, num_games=args.league_games,
+                            record_reference=False, **common)
+        parts.append(part)
+    merge_experience_files(parts, experience_file)
+    for part in parts:
+        os.unlink(part)
 
 
 def train_worker(learning_agent, output_file, experience_file,
@@ -773,6 +854,16 @@ def main():
                         help='how many of the --num-workers use the GPU; the '
                              'rest run single-threaded on the CPU (ignored '
                              'with --inference-server)')
+    parser.add_argument('--league-opponents', type=int, default=0,
+                        help='each self-play round, this many opponents drawn '
+                             'at random from the league (last 5 promoted '
+                             'references and the 3 latest best-of-first-2^n '
+                             'checkpoints, excluding the current reference) '
+                             'each play --league-games games against the '
+                             'learner; only the learner\'s moves are recorded '
+                             'and the reference plays the rest of -g '
+                             '(0 = off; needs --elo-games)')
+    parser.add_argument('--league-games', type=int, default=32)
     parser.add_argument('--inference-server', action='store_true',
                         help='one process evaluates the network on the GPU '
                              'for all --num-workers search workers, which '
@@ -781,6 +872,10 @@ def main():
     args = parser.parse_args()
     if not args.resume and not (args.lagent and args.ragent):
         parser.error('--lagent and --ragent are required unless --resume')
+    if args.league_opponents and (
+            args.league_opponents * args.league_games >= args.games_per_batch):
+        parser.error('--league-opponents x --league-games must be less '
+                     'than --games-per-batch')
     os.makedirs(args.work_dir, exist_ok=True)
 
     logf = open(args.log_file, 'a')
@@ -820,15 +915,9 @@ def main():
         logf.write('Total games so far %d\n' % (total_games,))
         for i in range(args.rounds_per_eval):
             print('Round %d/%d' % (i + 1, args.rounds_per_eval))
-            generate_experience(
-                training_agent, reference_agent,
-                experience_file,
-                num_games=args.games_per_batch,
-                board_size=args.board_size,
-                num_workers=args.num_workers,
-                parallel_games=args.parallel_games,
-                gpu_workers=args.gpu_workers,
-                inference_server=args.inference_server)
+            self_play_round(args, training_agent, reference_agent,
+                            generations, iteration + 1, experience_file,
+                            logf)
             train_on_experience(
                 training_agent, tmp_agent, experience_file,
                 lr=args.lr, batch_size=args.bs)

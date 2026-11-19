@@ -82,6 +82,16 @@ def fit_ratings(matches, anchor, prior_games=1.0, iterations=2000):
 
 def write_ratings(path, ratings, matches):
     """Write one row per generation, ordered by training games."""
+    rows = rating_rows(ratings, matches)
+    with open(path, 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=RATING_FIELDS)
+        w.writeheader()
+        w.writerows(rows)
+    return rows
+
+
+def rating_rows(ratings, matches):
+    """One dict per generation (RATING_FIELDS), ordered by training games."""
     first_seen = {}
     played = {}
     for m in matches:
@@ -94,10 +104,6 @@ def write_ratings(path, ratings, matches):
               elo=round(e, 1), games_played=played.get(p, 0))
          for p, e in ratings.items()),
         key=lambda r: (r['total_games'], r['generation']))
-    with open(path, 'w', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=RATING_FIELDS)
-        w.writeheader()
-        w.writerows(rows)
     return rows
 
 
