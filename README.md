@@ -97,6 +97,12 @@ random gen 0, which every trained generation beats 40-0 and which therefore
 cannot tell how much stronger it is. Generation 0 remains the 0-Elo anchor;
 `--elo-checkpoint gen0` restores the old behaviour.
 
+For a run rated the old way, backfill those checkpoint matches once (with
+training stopped, since both need the GPU):
+```
+python backfill_elo.py -d work/scratch2 -l work/scratch2/log --every 8 --games 40 --report-dir ../schematics
+```
+
 ## Run in the background on Windows
 Double-click `DLGo\start_training.bat` to resume the training run in its own
 window, and `DLGo\start_demo.bat` to play the best bot in the browser. Close a
