@@ -615,16 +615,52 @@ def write_elo_report(work_dir, generations, reference_agent, report_dir=None):
     return ratings
 
 
+def checkpoint_window(iteration):
+    """Largest power of two 2^n < iteration (0 for iteration 1)."""
+    size = 1
+    while size * 2 < iteration:
+        size *= 2
+    return size if size < iteration else 0
+
+
+def checkpoint_opponent(work_dir, generations, iteration):
+    """Elo opponent for the generation of `iteration`: the strongest
+    generation (highest current Elo) among the first 2^n generations, for
+    the largest n with 2^n < iteration. E.g. iteration 188 plays the best
+    of gen_0000..gen_0127. The window doubles as training goes on, so the
+    opponent stays a strong, mostly fixed yardstick instead of the random
+    gen 0, which every later generation beats 40-0 (a result that says
+    nothing about how much stronger it is). Iteration 1 plays gen 0."""
+    size = checkpoint_window(iteration)
+    pool = generations[:size]
+    if not pool:
+        return generations[0]
+    matches = elo.load_matches(os.path.join(work_dir, 'elo_matches.csv'))
+    if not matches:
+        return pool[0]
+    ratings = elo.fit_ratings(matches, anchor=generations[0])
+    return max(pool, key=lambda g: ratings.get(g, float('-inf')))
+
+
 def run_elo_matches(args, generations, training_agent, iteration,
                     total_games, logf, gating=None, reference_agent=None):
-    """Snapshot the learner as a new generation, play it against
-    generation 0 and the most recent generations, and refresh the ratings.
+    """Snapshot the learner as a new generation, play it against the best
+    of the first 2^n generations (see checkpoint_opponent; generation 0
+    with --elo-checkpoint gen0) and the most recent generations, and
+    refresh the ratings.
 
     gating = (reference_file, wins, losses) from this iteration's gating
     match; it is added to the match history when the reference is a known
     generation, since it is a match between the same weights."""
     name = save_generation(args.work_dir, training_agent, iteration)
-    opponents = [generations[0]] + generations[-args.elo_opponents:]
+    if args.elo_checkpoint == 'doubling':
+        checkpoint = checkpoint_opponent(args.work_dir, generations, iteration)
+        logf.write('Checkpoint opponent for %s: %s (best of the first %d '
+                   'generations)\n' % (name, checkpoint,
+                                       max(1, checkpoint_window(iteration))))
+    else:
+        checkpoint = generations[0]
+    opponents = [checkpoint] + generations[-args.elo_opponents:]
     opponents = list(dict.fromkeys(opponents))      # dedupe, keep order
     matches_file = os.path.join(args.work_dir, 'elo_matches.csv')
     if gating is not None:
@@ -718,10 +754,17 @@ def main():
                              'network evaluations are batched (0 = all at once)')
     parser.add_argument('--elo-games', type=int, default=0,
                         help='after each iteration, play this many games '
-                             'against generation 0 and the previous '
+                             'against a checkpoint generation (see '
+                             '--elo-checkpoint) and the previous '
                              '--elo-opponents generations and update '
                              'elo.csv / elo_report.html (0 = off)')
     parser.add_argument('--elo-opponents', type=int, default=2)
+    parser.add_argument('--elo-checkpoint', choices=['doubling', 'gen0'],
+                        default='doubling',
+                        help='doubling: at iteration k play the highest-rated '
+                             'of the first 2^n generations (largest 2^n < k); '
+                             'gen0: always play generation 0 (gen 0 stays '
+                             'the 0-Elo anchor either way)')
     parser.add_argument('--report-dir',
                         help='also copy elo_report.html (as '
                              'rlgo_elo_report.html) and elo.csv here after '

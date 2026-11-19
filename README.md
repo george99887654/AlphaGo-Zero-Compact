@@ -88,6 +88,15 @@ chart to `schematics/rlgo_elo_report.html` (and the ratings to
 `schematics/rlgo_elo.csv`) after every iteration. Gating matches against the
 reference are counted in the ratings along with the Elo matches.
 
+Each new generation plays `--elo-games` games against the previous
+`--elo-opponents` generations and one checkpoint opponent: at iteration *k*,
+the highest-rated of the first 2^n generations for the largest 2^n < *k*
+(iteration 188 plays the best of gen_0000..gen_0127). The window doubles over
+time, so the checkpoint is a strong yardstick that rarely changes, unlike the
+random gen 0, which every trained generation beats 40-0 and which therefore
+cannot tell how much stronger it is. Generation 0 remains the 0-Elo anchor;
+`--elo-checkpoint gen0` restores the old behaviour.
+
 ## Run in the background on Windows
 Double-click `DLGo\start_training.bat` to resume the training run in its own
 window, and `DLGo\start_demo.bat` to play the best bot in the browser. Close a
