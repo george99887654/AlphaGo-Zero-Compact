@@ -108,7 +108,7 @@ def rating_rows(ratings, matches):
 
 
 def write_html_report(path, rows, matches, title='RLGo training: Elo progress',
-                      reference=None, promoted=()):
+                      reference=None, promoted=(), gate_threshold=0.55):
     """Self-contained HTML page with an SVG Elo chart and the match table.
 
     reference: the generation that is currently the gating opponent (the
@@ -170,9 +170,10 @@ def write_html_report(path, rows, matches, title='RLGo training: Elo progress',
     if ref_row is not None:
         gate = ('<div class="gate"><span class="k">Current best (gate opponent)</span>'
                 '<span class="v">%s</span><span class="s">%.0f Elo &middot; reference since '
-                '%d self-play games &middot; the learner must win at least 55%% of the '
+                '%d self-play games &middot; the learner must win at least %.0f%% of the '
                 'gating games against it to replace it</span></div>'
-                % (html.escape(reference), ref_row['elo'], ref_row['total_games']))
+                % (html.escape(reference), ref_row['elo'], ref_row['total_games'],
+                   100 * gate_threshold))
     elif reference:
         gate = ('<div class="gate"><span class="k">Current best (gate opponent)</span>'
                 '<span class="v">%s</span><span class="s">starting agent</span></div>'

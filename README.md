@@ -56,7 +56,7 @@ CPU, versus 39 moves/s at 47% CPU for the hybrid `-w 7 --gpu-workers 1 -p 16`.
 
 Each iteration plays `--rounds-per-eval` (default 10) rounds of `-g` self-play
 games, trains on each round, then plays `--eval-games` (default 100) against the
-reference agent; at >= 55% wins the learner becomes the new reference
+reference agent; at >= `--gate-threshold` (default 55%) wins the learner becomes the new reference
 (saved as `work/zero_agent_v2_<games>.hdf5`). `--max-iterations N` stops after N
 evaluations (default: run forever).
 

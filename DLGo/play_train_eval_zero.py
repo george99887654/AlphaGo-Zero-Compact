@@ -676,7 +676,8 @@ def reference_generations(work_dir, rows, reference_agent, generations):
     return current, promoted
 
 
-def write_elo_report(work_dir, generations, reference_agent, report_dir=None):
+def write_elo_report(work_dir, generations, reference_agent, report_dir=None,
+                     gate_threshold=0.55):
     """Refit the ratings from the match history and rewrite elo.csv and
     elo_report.html (also copied to report_dir). Returns the ratings."""
     matches = elo.load_matches(os.path.join(work_dir, 'elo_matches.csv'))
@@ -687,7 +688,7 @@ def write_elo_report(work_dir, generations, reference_agent, report_dir=None):
                                               reference_agent, generations)
     report = os.path.join(work_dir, 'elo_report.html')
     elo.write_html_report(report, rows, matches, reference=current,
-                          promoted=promoted)
+                          promoted=promoted, gate_threshold=gate_threshold)
     if report_dir:
         os.makedirs(report_dir, exist_ok=True)
         shutil.copy(report, os.path.join(report_dir, 'rlgo_elo_report.html'))
@@ -769,7 +770,7 @@ def run_elo_matches(args, generations, training_agent, iteration,
     generations.append(name)
 
     ratings = write_elo_report(args.work_dir, generations, reference_agent,
-                               args.report_dir)
+                               args.report_dir, args.gate_threshold)
     print('Elo of %s: %.0f (gen 0 = 0)' % (name, ratings[name]))
     logf.write('Elo of %s after %d games: %.0f\n' % (
         name, total_games, ratings[name]))
@@ -828,6 +829,11 @@ def main():
     parser.add_argument('--rounds-per-eval', type=int, default=10,
                         help='self-play + train rounds between evaluations')
     parser.add_argument('--eval-games', type=int, default=100)
+    parser.add_argument('--gate-threshold', type=float, default=0.55,
+                        help='fraction of the --eval-games the learner must '
+                             'win against the reference to replace it. With '
+                             '100 games, 0.55 promotes an equally strong '
+                             'learner 18%% of the time, 0.58 only 7%%')
     parser.add_argument('--max-iterations', type=int, default=0,
                         help='stop after this many evaluations (0 = run forever)')
     parser.add_argument('--parallel-games', '-p', type=int, default=32,
@@ -939,7 +945,7 @@ def main():
             wins, num_eval, float(wins) / num_eval))
 
         gating = (reference_agent, wins, num_eval - wins)
-        if wins >= 0.55 * num_eval:
+        if wins >= args.gate_threshold * num_eval - 1e-9:
             next_filename = os.path.join(
                 args.work_dir,
                 'zero_agent_v2_%08d.hdf5' % (total_games,))

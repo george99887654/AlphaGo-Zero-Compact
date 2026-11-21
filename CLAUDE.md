@@ -1,7 +1,7 @@
 # RLGo (AlphaGo-Zero-Compact): notes for Claude Code
 
 AlphaGo Zero for 9x9 Go: self-play with batched MCTS, a policy/value ResNet,
-gating at 55%, checkpoint Elo ratings, an opponent league and a browser demo.
+gating (`--gate-threshold`, 58% of 100 games in the launcher), checkpoint Elo ratings, an opponent league and a browser demo.
 User docs are in `README.md`; the architecture map is
 `schematics/rlgo_code_map.html`.
 
