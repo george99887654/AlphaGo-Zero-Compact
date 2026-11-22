@@ -108,6 +108,16 @@ of strong past opponents keeps the learner from overfitting to the current
 reference or forgetting how to beat older styles. The chosen opponents are
 written to the log. Needs `--elo-games` (the league is chosen by Elo).
 
+With `--league-checkpoints curated` the checkpoint part of the league is a
+curated list instead: the best of the first 2^n generations for every 2^n,
+plus the best of each completed block of 32 generations from gen 192
+([192, 223], [224, 255], ...). Members play each other once, 100 games per
+pair (`--league-match-games`, counted in the Elo history), and any member that
+wins less than 5% (`--league-prune`) against the strongest member is removed
+for good. The last 5 promoted references are never removed. The matches run
+inside training, before a round's self-play, whenever the list has unplayed
+pairs; state is kept in `league_checkpoints.json` in the work directory.
+
 For a run rated the old way, backfill those checkpoint matches once (with
 training stopped, since both need the GPU):
 ```

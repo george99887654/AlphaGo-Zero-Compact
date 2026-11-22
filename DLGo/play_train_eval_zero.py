@@ -2,6 +2,8 @@ import argparse
 import datetime
 import filecmp
 import glob
+import itertools
+import json
 import multiprocessing
 import os
 import random
@@ -429,12 +431,14 @@ def merge_experience_files(filenames, exp_file):
 
 
 def league_pool(work_dir, generations, reference_agent, iteration,
-                promoted_count=5, checkpoint_count=3):
+                promoted_count=5, checkpoint_count=3, checkpoints=None):
     """Candidate league opponents for the self-play of `iteration`, as
     generation names: the last `promoted_count` promoted references and the
     checkpoints (best of the first 2^n generations) for the
     `checkpoint_count` largest 2^n < iteration, without duplicates and
-    without the current reference (the main self-play games play it)."""
+    without the current reference (the main self-play games play it).
+    `checkpoints`, if given, replaces the 2^n checkpoints (see
+    update_curated_checkpoints)."""
     matches = elo.load_matches(os.path.join(work_dir, 'elo_matches.csv'))
     if not matches or not generations:
         return []
@@ -445,6 +449,9 @@ def league_pool(work_dir, generations, reference_agent, iteration,
     pool = [g for g in promoted if g != current][-promoted_count:]
     sizes = []
     size = checkpoint_window(iteration)
+    if checkpoints is not None:
+        pool.extend(checkpoints)
+        size = 0
     while size >= 1 and len(sizes) < checkpoint_count:
         sizes.append(size)
         size //= 2
@@ -458,8 +465,114 @@ def league_pool(work_dir, generations, reference_agent, iteration,
             if g != current and g in available]
 
 
+def checkpoint_candidates(generations, ratings, iteration, block=32,
+                          block_start=192):
+    """Curated checkpoint candidates: the highest-rated generation of the
+    first 2^n generations for every 2^n < iteration, and of every completed
+    block of `block` generations from `block_start` on ([192, 223],
+    [224, 255], ...), without duplicates."""
+    def best(pool):
+        return max(pool, key=lambda g: ratings.get(g, float('-inf')))
+    candidates = []
+    size = 1
+    while size < iteration and generations[:size]:
+        candidates.append(best(generations[:size]))
+        size *= 2
+    start = block_start
+    while start + block <= len(generations):
+        candidates.append(best(generations[start:start + block]))
+        start += block
+    return list(dict.fromkeys(candidates))
+
+
+def update_curated_checkpoints(args, generations, iteration, total_games,
+                               logf):
+    """Bring the curated checkpoint list up to date and return its members.
+
+    Members play each other once, --league-match-games games per pair
+    (results go into the Elo history). A member that wins less than
+    --league-prune of its games against the strongest member (highest Elo)
+    is removed for good. Pairs with the strongest member are played first,
+    so hopeless members are dropped before playing anyone else. State
+    (pairs played, members removed) is kept in league_checkpoints.json."""
+    work_dir = args.work_dir
+    state_file = os.path.join(work_dir, 'league_checkpoints.json')
+    state = {'pairs': {}, 'removed': {}}
+    if os.path.exists(state_file):
+        with open(state_file) as f:
+            state.update(json.load(f))
+    matches_file = os.path.join(work_dir, 'elo_matches.csv')
+
+    def key(a, b):
+        return '|'.join(sorted((a, b)))
+
+    def score(a, b):
+        """(wins of a, games) in the mutual match of a and b, or None."""
+        result = state['pairs'].get(key(a, b))
+        if result is None:
+            return None
+        first, second = sorted((a, b))
+        wins = result[0] if a == first else result[1]
+        return wins, result[0] + result[1]
+
+    def save():
+        with open(state_file + '.tmp', 'w') as f:
+            json.dump(state, f, indent=1, sort_keys=True)
+        os.replace(state_file + '.tmp', state_file)
+
+    while True:
+        ratings = elo.fit_ratings(elo.load_matches(matches_file),
+                                  anchor=generations[0])
+        members = [g for g in checkpoint_candidates(
+            generations, ratings, iteration, args.league_block,
+            args.league_block_start) if g not in state['removed']]
+        if not members:
+            return []
+        strongest = max(members, key=lambda g: ratings.get(g, float('-inf')))
+        for g in list(members):
+            result = score(g, strongest) if g != strongest else None
+            if result and result[0] < args.league_prune * result[1]:
+                state['removed'][g] = '%d/%d vs %s' % (result[0], result[1],
+                                                       strongest)
+                members.remove(g)
+                logf.write('Curated checkpoints: removed %s (won %d of %d '
+                           'against the strongest, %s)\n' % (
+                               g, result[0], result[1], strongest))
+                save()
+        pending = [(strongest, g) for g in members
+                   if g != strongest and score(g, strongest) is None]
+        if not pending:
+            pending = [(a, b) for a, b in itertools.combinations(members, 2)
+                       if score(a, b) is None]
+        if not pending:
+            logf.write('Curated checkpoints for iteration %d: %s (strongest '
+                       '%s)\n' % (iteration, ', '.join(members), strongest))
+            logf.flush()
+            return members
+        a, b = pending[0]
+        print('Curated checkpoints: %s vs %s (%d games)' % (
+            a, b, args.league_match_games))
+        wins = evaluate(
+            os.path.join(work_dir, a + '.hdf5'),
+            os.path.join(work_dir, b + '.hdf5'),
+            num_games=args.league_match_games,
+            num_workers=args.num_workers, board_size=args.board_size,
+            parallel_games=args.parallel_games, gpu_workers=args.gpu_workers,
+            inference_server=args.inference_server)
+        losses = args.league_match_games - wins
+        first, _ = sorted((a, b))
+        state['pairs'][key(a, b)] = ([wins, losses] if a == first
+                                     else [losses, wins])
+        save()
+        elo.append_match(matches_file, iteration - 1, total_games, a, b,
+                         wins, losses)
+        logf.write('Curated checkpoint match %s vs %s: %d-%d\n' % (
+            a, b, wins, losses))
+        logf.flush()
+
+
 def self_play_round(args, training_agent, reference_agent, generations,
-                    iteration, experience_file, logf):
+                    iteration, experience_file, logf, total_games=0):
     """One round of self-play into experience_file. Without a league this
     is --games-per-batch games against the reference. With
     --league-opponents N, N opponents drawn at random from league_pool each
@@ -467,8 +580,12 @@ def self_play_round(args, training_agent, reference_agent, generations,
     are recorded) and the reference plays the rest."""
     league = []
     if args.league_opponents and generations:
+        checkpoints = None
+        if args.league_checkpoints == 'curated':
+            checkpoints = update_curated_checkpoints(
+                args, generations, iteration, total_games, logf)
         pool = league_pool(args.work_dir, generations, reference_agent,
-                           iteration)
+                           iteration, checkpoints=checkpoints)
         league = random.sample(pool, min(args.league_opponents, len(pool)))
         logf.write('League for iteration %d: %s (pool %s)\n' % (
             iteration, ', '.join(league) or 'none', ', '.join(pool)))
@@ -870,6 +987,21 @@ def main():
                              'and the reference plays the rest of -g '
                              '(0 = off; needs --elo-games)')
     parser.add_argument('--league-games', type=int, default=32)
+    parser.add_argument('--league-checkpoints', choices=['latest', 'curated'],
+                        default='latest',
+                        help='checkpoint part of the league pool. latest: '
+                             'best of the first 2^n generations for the 3 '
+                             'largest 2^n. curated: best of the first 2^n '
+                             'for every 2^n plus the best of each completed '
+                             '--league-block from --league-block-start; '
+                             'members play each other --league-match-games '
+                             'games once and any member winning less than '
+                             '--league-prune against the strongest is '
+                             'removed (the last 5 promoted are never removed)')
+    parser.add_argument('--league-block', type=int, default=32)
+    parser.add_argument('--league-block-start', type=int, default=192)
+    parser.add_argument('--league-match-games', type=int, default=100)
+    parser.add_argument('--league-prune', type=float, default=0.05)
     parser.add_argument('--inference-server', action='store_true',
                         help='one process evaluates the network on the GPU '
                              'for all --num-workers search workers, which '
@@ -923,7 +1055,7 @@ def main():
             print('Round %d/%d' % (i + 1, args.rounds_per_eval))
             self_play_round(args, training_agent, reference_agent,
                             generations, iteration + 1, experience_file,
-                            logf)
+                            logf, total_games)
             train_on_experience(
                 training_agent, tmp_agent, experience_file,
                 lr=args.lr, batch_size=args.bs)

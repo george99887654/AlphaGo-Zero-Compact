@@ -10,7 +10,7 @@ title RLGo training (close this window to stop)
 "%~dp0..\.venv\Scripts\python.exe" play_train_eval_zero.py --resume --report-dir ..\schematics ^
   -d work\scratch2 -l work\scratch2\log ^
   -g 256 --rounds-per-eval 1 --eval-games 128 --gate-threshold 0.60 --elo-games 40 --elo-opponents 1 ^
-  -w 2 -p 128 --inference-server --league-opponents 2 --league-games 32 ^
+  -w 2 -p 128 --inference-server --league-opponents 2 --league-games 32 --league-checkpoints curated ^
   --lr 0.0005 --bs 256
 echo.
 echo Training stopped. Run this file again to resume.
