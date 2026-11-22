@@ -36,7 +36,12 @@ def load_model_from_hdf5_group(f, custom_objects=None):
         for k in root_item.keys():
             f.copy(root_item.get(k), serialized_model, k)
         serialized_model.close()
-        return load_model(tempfname, custom_objects=custom_objects)
+        # compile=False: loaded models are used for inference or recompiled
+        # by ZeroAgent.train, so the saved optimizer state is never needed,
+        # and files saved before any training (gen 0 / init) have none,
+        # which made Keras warn "No training configuration found".
+        return load_model(tempfname, custom_objects=custom_objects,
+                          compile=False)
     finally:
         os.unlink(tempfname)
 
