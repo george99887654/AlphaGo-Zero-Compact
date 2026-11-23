@@ -365,10 +365,21 @@ def do_self_play(board_size, agent1_filename, agent2_filename,
         experience.serialize(experience_outf)
 
 
+def require_even_games(num_games, what='match'):
+    """Game g gives agent 1 Black when g is even and White when it is odd
+    (play_games_continuous), so a match has as many Black as White games
+    for each side exactly when it has an even number of games."""
+    if num_games % 2:
+        raise ValueError('%s needs an even number of games so both agents '
+                         'play Black and White equally often (got %d)' % (
+                             what, num_games))
+
+
 def generate_experience(learning_agent, reference_agent, exp_file,
                         num_games, board_size, num_workers,
                         parallel_games=32, gpu_workers=1,
                         inference_server=False, record_reference=True):
+    require_even_games(num_games, 'self-play')
     experience_files = []
     workers = []
     counter = multiprocessing.Value('i', 0)
@@ -720,6 +731,7 @@ def eval_worker(agent1_fname, agent2_fname, num_games, board_size,
 def evaluate(learning_agent, reference_agent,
              num_games, num_workers, board_size,
              parallel_games=32, gpu_workers=1, inference_server=False):
+    require_even_games(num_games, 'evaluation')
     counter = multiprocessing.Value('i', 0)
     results = multiprocessing.Queue()
     workers = []
@@ -1006,6 +1018,10 @@ def main():
                         help='one process evaluates the network on the GPU '
                              'for all --num-workers search workers, which '
                              'then do only the tree search on the CPU')
+    parser.add_argument('--komi', type=float, default=scoring.DEFAULT_KOMI,
+                        help="points added to White's score (default "
+                             '%(default)s, the usual 9x9 value; runs before '
+                             'v1.1.7 used 1.5, which favoured Black)')
 
     args = parser.parse_args()
     if not args.resume and not (args.lagent and args.ragent):
@@ -1014,10 +1030,28 @@ def main():
             args.league_opponents * args.league_games >= args.games_per_batch):
         parser.error('--league-opponents x --league-games must be less '
                      'than --games-per-batch')
+    # Every match alternates colours by game number, so even game counts
+    # give each pair of agents equally many Black and White games.
+    counts = {'--eval-games': args.eval_games, '--elo-games': args.elo_games,
+              '--games-per-batch minus the league games':
+                  args.games_per_batch - (args.league_opponents *
+                                          args.league_games)}
+    if args.league_opponents:
+        counts['--league-games'] = args.league_games
+        if args.league_checkpoints == 'curated':
+            counts['--league-match-games'] = args.league_match_games
+    for flag, n in counts.items():
+        if n % 2:
+            parser.error('%s must be even so both agents play Black and '
+                         'White equally often (got %d)' % (flag, n))
+    # Workers are new processes that read the komi from the environment.
+    os.environ['RLGO_KOMI'] = repr(args.komi)
+    scoring.KOMI = args.komi
     os.makedirs(args.work_dir, exist_ok=True)
 
     logf = open(args.log_file, 'a')
     logf.write('----------------------\n')
+    logf.write('Komi %s\n' % args.komi)
     experience_file = os.path.join(args.work_dir, 'zero_exp_temp.hdf5')
     tmp_agent = os.path.join(args.work_dir, 'zero_agent_temp.hdf5')
     # training_agent is the single, continuously-updated learner: it plays

@@ -34,6 +34,9 @@ def main():
     parser.add_argument('--board-size', '-b', type=int, default=9)
     parser.add_argument('--report-dir')
     args = parser.parse_args()
+    if args.games % 2:
+        parser.error('--games must be even so both sides play Black and '
+                     'White equally often')
 
     state = p.load_run_state(args.work_dir, args.log_file)
     generations = state['generations']

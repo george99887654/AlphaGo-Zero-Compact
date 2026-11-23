@@ -1,9 +1,18 @@
 # tag::scoring_imports[]
 from __future__ import absolute_import
+import os
 from collections import namedtuple
 
 from dlgo.gotypes import Player, Point
 # end::scoring_imports[]
+
+
+# Points added to White's score. 7.5 is the usual komi for 9x9 with area
+# scoring, and the half point rules out draws. RLGO_KOMI overrides it;
+# play_train_eval_zero.py --komi sets it so its worker processes, which import
+# this module afresh, use the same value.
+DEFAULT_KOMI = 7.5
+KOMI = float(os.environ.get('RLGO_KOMI', DEFAULT_KOMI))
 
 
 # tag::scoring_territory[]
@@ -127,10 +136,10 @@ def _collect_region(start_pos, board, visited=None):
 
 
 # tag::scoring_compute_game_result[]
-def compute_game_result(game_state):
+def compute_game_result(game_state, komi=None):
     territory = evaluate_territory(game_state.board)
     return GameResult(
         territory.num_black_territory + territory.num_black_stones,
         territory.num_white_territory + territory.num_white_stones,
-        komi=1.5)
+        komi=KOMI if komi is None else komi)
 # end::scoring_compute_game_result[]

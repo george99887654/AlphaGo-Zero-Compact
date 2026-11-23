@@ -60,6 +60,13 @@ reference agent; at >= `--gate-threshold` (default 55%) wins the learner becomes
 (saved as `work/zero_agent_v2_<games>.hdf5`). `--max-iterations N` stops after N
 evaluations (default: run forever).
 
+Games are scored by area with a komi of 7.5 for White (`--komi`; runs before
+v1.1.7 used 1.5, under which Black won about two thirds of the games). In
+every match the two agents alternate colours game by game, so each plays
+Black and White equally often; for that every game count (`--eval-games`,
+`--elo-games`, `--league-games`, `--league-match-games` and `-g` minus the
+league games) must be even, and odd counts are rejected at startup.
+
 ## Agents trained with the old (TF 2.2 / Keras 2.3) version
 Convert them once so they run on TF 2.10 (outputs are identical):
 ```

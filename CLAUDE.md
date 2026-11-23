@@ -1,6 +1,7 @@
 # RLGo (AlphaGo-Zero-Compact): notes for Claude Code
 
 AlphaGo Zero for 9x9 Go: self-play with batched MCTS, a policy/value ResNet,
+komi 7.5 (`--komi`, `dlgo/scoring.py`), equal Black/White games per match (even game counts enforced),
 gating (`--gate-threshold`, 60% of 128 games in the launcher), checkpoint Elo ratings, an opponent league (curated checkpoints, `league_checkpoints.json`) and a browser demo.
 User docs are in `README.md`; the architecture map is
 `schematics/rlgo_code_map.html`.
