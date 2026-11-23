@@ -136,8 +136,8 @@ python backfill_elo.py -d work/scratch2 -l work/scratch2/log --every 8 --games 4
 
 ## Run in the background on Windows
 There are two runs. Run 1 (`work/scratch2`, komi 1.5) is frozen at
-iteration 288: `DLGo\start_training.bat` resumes it until it gets there and
-then does nothing. Run 2 (`work/scratch3`) starts from a random network with
+iteration 284 (gen_0284 is its last generation), so `DLGo\start_training.bat`
+now does nothing. Run 2 (`work/scratch3`) starts from a random network with
 komi 7.5 and otherwise the same settings: `DLGo\start_training_run2.bat`
 creates it on the first start and resumes it after that. Its chart is
 `schematics/rlgo_elo_report_run2.html`. Run one launcher at a time, since both

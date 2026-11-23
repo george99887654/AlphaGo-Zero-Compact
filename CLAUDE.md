@@ -54,7 +54,7 @@ User docs are in `README.md`; the architecture map is
 - Put scratch scripts and logs in `DLGo/work/tmp/` (git-ignored).
 
 ## Run data (git-ignored)
-- `DLGo/work/scratch2/`: run 1 (komi 1.5), frozen at iteration 288
+- `DLGo/work/scratch2/`: run 1 (komi 1.5), frozen at iteration 284
   (`--stop-at-iteration` in `start_training.bat`). Its report is
   `schematics/rlgo_elo_report.html`.
 - `DLGo/work/scratch3/`: run 2, from scratch with komi 7.5
