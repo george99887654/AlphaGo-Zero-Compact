@@ -806,9 +806,11 @@ def reference_generations(work_dir, rows, reference_agent, generations):
 
 
 def write_elo_report(work_dir, generations, reference_agent, report_dir=None,
-                     gate_threshold=0.55):
+                     gate_threshold=0.55, report_name=None):
     """Refit the ratings from the match history and rewrite elo.csv and
-    elo_report.html (also copied to report_dir). Returns the ratings."""
+    elo_report.html (also copied to report_dir, as rlgo_elo_report.html and
+    rlgo_elo.csv, or rlgo_elo_report_<report_name>.html and
+    rlgo_elo_<report_name>.csv). Returns the ratings."""
     matches = elo.load_matches(os.path.join(work_dir, 'elo_matches.csv'))
     ratings = elo.fit_ratings(matches, anchor=generations[0])
     rows = elo.write_ratings(os.path.join(work_dir, 'elo.csv'),
@@ -816,13 +818,19 @@ def write_elo_report(work_dir, generations, reference_agent, report_dir=None,
     current, promoted = reference_generations(work_dir, rows,
                                               reference_agent, generations)
     report = os.path.join(work_dir, 'elo_report.html')
-    elo.write_html_report(report, rows, matches, reference=current,
-                          promoted=promoted, gate_threshold=gate_threshold)
+    title = 'RLGo training: Elo progress'
+    if report_name:
+        title += ' (%s)' % report_name
+    elo.write_html_report(report, rows, matches, title=title,
+                          reference=current, promoted=promoted,
+                          gate_threshold=gate_threshold)
     if report_dir:
+        suffix = '_' + report_name if report_name else ''
         os.makedirs(report_dir, exist_ok=True)
-        shutil.copy(report, os.path.join(report_dir, 'rlgo_elo_report.html'))
+        shutil.copy(report, os.path.join(
+            report_dir, 'rlgo_elo_report%s.html' % suffix))
         shutil.copy(os.path.join(work_dir, 'elo.csv'),
-                    os.path.join(report_dir, 'rlgo_elo.csv'))
+                    os.path.join(report_dir, 'rlgo_elo%s.csv' % suffix))
     return ratings
 
 
@@ -899,7 +907,8 @@ def run_elo_matches(args, generations, training_agent, iteration,
     generations.append(name)
 
     ratings = write_elo_report(args.work_dir, generations, reference_agent,
-                               args.report_dir, args.gate_threshold)
+                               args.report_dir, args.gate_threshold,
+                               args.report_name)
     print('Elo of %s: %.0f (gen 0 = 0)' % (name, ratings[name]))
     logf.write('Elo of %s after %d games: %.0f\n' % (
         name, total_games, ratings[name]))
@@ -985,6 +994,15 @@ def main():
                         help='also copy elo_report.html (as '
                              'rlgo_elo_report.html) and elo.csv here after '
                              'every iteration, e.g. ../schematics')
+    parser.add_argument('--report-name',
+                        help='name of this run in the report: the copies in '
+                             '--report-dir become rlgo_elo_report_<name>.html '
+                             'and rlgo_elo_<name>.csv, so runs keep separate '
+                             'reports')
+    parser.add_argument('--stop-at-iteration', type=int, default=0,
+                        help='stop once this many iterations (generations) '
+                             'are complete, counting the whole run, so a '
+                             'resumed run stops at the same place (0 = never)')
     parser.add_argument('--gpu-workers', type=int, default=1,
                         help='how many of the --num-workers use the GPU; the '
                              'rest run single-threaded on the CPU (ignored '
@@ -1082,6 +1100,11 @@ def main():
         if args.elo_games:
             generations.append(save_generation(args.work_dir, training_agent, 0))
     start_iteration = iteration
+    if args.stop_at_iteration and iteration >= args.stop_at_iteration:
+        print('Iteration %d already reached (--stop-at-iteration %d); '
+              'nothing to do' % (iteration, args.stop_at_iteration))
+        logf.close()
+        return
     while True:
         print('Reference: %s' % (reference_agent,))
         logf.write('Total games so far %d\n' % (total_games,))
@@ -1129,6 +1152,12 @@ def main():
 
         logf.flush()
         if args.max_iterations and iteration - start_iteration >= args.max_iterations:
+            break
+        if args.stop_at_iteration and iteration >= args.stop_at_iteration:
+            logf.write('Stopped at iteration %d (--stop-at-iteration)\n'
+                       % iteration)
+            print('Reached iteration %d (--stop-at-iteration); stopping'
+                  % iteration)
             break
     logf.close()
 

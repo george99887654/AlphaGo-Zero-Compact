@@ -195,7 +195,7 @@ def write_html_report(path, rows, matches, title='RLGo training: Elo progress',
               '<span class="sw ref"></span>current gate opponent</p>')
     page = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RLGo Elo progress</title>
+<title>%s</title>
 <style>
 :root{--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--line:#e7e5e4;--accent:#2563eb;--prom:#16a34a;--gate:#d97706}
 @media (prefers-color-scheme: dark){:root{--bg:#1c1917;--fg:#f5f5f4;--muted:#a8a29e;--line:#44403c;--accent:#60a5fa;--prom:#4ade80;--gate:#fbbf24}}
@@ -228,7 +228,7 @@ th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)} th{co
 </svg>
 %s<h2>Matches</h2>
 <div class="wrap"><table><tr><th>Iter</th><th>Games</th><th>Player</th><th>Opponent</th><th>W-L</th><th>Win %%</th></tr>%s</table></div>
-</main></body></html>""" % (html.escape(title), gate, summary, legend, W, H, ''.join(ticks), pts,
+</main></body></html>""" % (html.escape(title), html.escape(title), gate, summary, legend, W, H, ''.join(ticks), pts,
                             dots, (L + W - R) // 2, H - 6, (T + H - B) // 2, (T + H - B) // 2,
                             history, match_rows)
     with open(path, 'w', encoding='utf-8') as f:

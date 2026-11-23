@@ -1,5 +1,7 @@
 @echo off
-rem Resume the RLGo training run in work\scratch2 in its own window.
+rem Resume run 1 (work\scratch2, komi 1.5) in its own window. It is frozen at
+rem iteration 288: it stops there, and starting it again does nothing.
+rem Run 2 (from scratch, komi 7.5) is start_training_run2.bat.
 rem Double-click this file (or run it from a terminal). Close the window or
 rem press Ctrl+C to stop; start it again later and it continues where it
 rem stopped. The Elo chart is updated in ..\schematics after every iteration.
@@ -11,7 +13,7 @@ title RLGo training (close this window to stop)
   -d work\scratch2 -l work\scratch2\log ^
   -g 256 --rounds-per-eval 1 --eval-games 128 --gate-threshold 0.60 --elo-games 40 --elo-opponents 1 ^
   -w 2 -p 128 --inference-server --league-opponents 2 --league-games 32 --league-checkpoints curated ^
-  --lr 0.0005 --bs 256 --komi 7.5
+  --lr 0.0005 --bs 256 --komi 1.5 --stop-at-iteration 288
 echo.
 echo Training stopped. Run this file again to resume.
 pause

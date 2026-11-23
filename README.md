@@ -58,7 +58,8 @@ Each iteration plays `--rounds-per-eval` (default 10) rounds of `-g` self-play
 games, trains on each round, then plays `--eval-games` (default 100) against the
 reference agent; at >= `--gate-threshold` (default 55%) wins the learner becomes the new reference
 (saved as `work/zero_agent_v2_<games>.hdf5`). `--max-iterations N` stops after N
-evaluations (default: run forever).
+evaluations (default: run forever); `--stop-at-iteration N` stops once the run
+has N generations, also when resumed.
 
 Games are scored by area with a komi of 7.5 for White (`--komi`; runs before
 v1.1.7 used 1.5, under which Black won about two thirds of the games). In
@@ -94,6 +95,8 @@ Run with `--report-dir ../schematics` and the training loop copies its Elo
 chart to `schematics/rlgo_elo_report.html` (and the ratings to
 `schematics/rlgo_elo.csv`) after every iteration. Gating matches against the
 reference are counted in the ratings along with the Elo matches.
+With `--report-name NAME` the copies are `rlgo_elo_report_NAME.html` and
+`rlgo_elo_NAME.csv` instead, so several runs keep separate reports.
 
 Each new generation plays `--elo-games` games against the previous
 `--elo-opponents` generations and one checkpoint opponent: at iteration *k*,
@@ -132,7 +135,15 @@ python backfill_elo.py -d work/scratch2 -l work/scratch2/log --every 8 --games 4
 ```
 
 ## Run in the background on Windows
-Double-click `DLGo\start_training.bat` to resume the training run in its own
+There are two runs. Run 1 (`work/scratch2`, komi 1.5) is frozen at
+iteration 288: `DLGo\start_training.bat` resumes it until it gets there and
+then does nothing. Run 2 (`work/scratch3`) starts from a random network with
+komi 7.5 and otherwise the same settings: `DLGo\start_training_run2.bat`
+creates it on the first start and resumes it after that. Its chart is
+`schematics/rlgo_elo_report_run2.html`. Run one launcher at a time, since both
+need the GPU.
+
+Double-click a launcher to run training in its own
 window, and `DLGo\start_demo.bat` to play the best bot in the browser. Close a
 window to stop it; starting it again continues where it left off. Start them
 yourself rather than from Claude Code: processes started from a Claude Code

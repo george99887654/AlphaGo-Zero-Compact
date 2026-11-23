@@ -33,6 +33,7 @@ def main():
     parser.add_argument('--parallel-games', '-p', type=int, default=10)
     parser.add_argument('--board-size', '-b', type=int, default=9)
     parser.add_argument('--report-dir')
+    parser.add_argument('--report-name')
     args = parser.parse_args()
     if args.games % 2:
         parser.error('--games must be even so both sides play Black and '
@@ -77,7 +78,8 @@ def main():
                 time.time() - t0), flush=True)
 
     ratings = p.write_elo_report(args.work_dir, generations,
-                                 state['reference'], args.report_dir)
+                                 state['reference'], args.report_dir,
+                                 report_name=args.report_name)
     top = sorted(ratings.items(), key=lambda kv: -kv[1])[:5]
     print('TOP', ', '.join('%s %.0f' % kv for kv in top))
     print('LATEST %s %.0f' % (generations[-1], ratings[generations[-1]]))

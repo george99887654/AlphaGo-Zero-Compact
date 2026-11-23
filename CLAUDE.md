@@ -26,8 +26,9 @@ User docs are in `README.md`; the architecture map is
   the user to close the training window and check that it has stopped.
 - Changes to the training scheme (self-play, targets, gating, league) go
   behind opt-in flags. Don't change existing defaults silently.
-- When flags or the launcher change, update `README.md`,
-  `DLGo/start_training.bat` and this file in the same commit.
+- When flags or the launchers change, update `README.md`,
+  `DLGo/start_training.bat`, `DLGo/start_training_run2.bat` and this file in
+  the same commit.
 
 ## Code layout (DLGo/)
 - `play_train_eval_zero.py`: the training loop
@@ -53,7 +54,14 @@ User docs are in `README.md`; the architecture map is
 - Put scratch scripts and logs in `DLGo/work/tmp/` (git-ignored).
 
 ## Run data (git-ignored)
-- `DLGo/work/scratch2/`: the live run. `log`, `elo_matches.csv`,
+- `DLGo/work/scratch2/`: run 1 (komi 1.5), frozen at iteration 288
+  (`--stop-at-iteration` in `start_training.bat`). Its report is
+  `schematics/rlgo_elo_report.html`.
+- `DLGo/work/scratch3/`: run 2, from scratch with komi 7.5
+  (`start_training_run2.bat`, `--report-name run2`, report
+  `schematics/rlgo_elo_report_run2.html`). The two runs will be compared
+  once run 2 has trained enough. Only one run trains at a time (one GPU).
+- Each run directory holds `log`, `elo_matches.csv`,
   `elo.csv`, `gen_NNNN.hdf5` snapshots, `zero_agent_v2_<games>.hdf5`
   promoted references, `zero_agent_train.hdf5` (the learner).
 - `schematics/rlgo_elo_report.html` and `rlgo_elo.csv` are refreshed after
